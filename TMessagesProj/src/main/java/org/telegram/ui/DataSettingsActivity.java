@@ -27,6 +27,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.BatteryPolicy;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.DownloadController;
 import org.telegram.messenger.ImageLoader;
@@ -112,6 +113,12 @@ public class DataSettingsActivity extends BaseFragment {
     @Keep
     private int saveToGalleryGroupsRow;
     private int saveToGalleryDividerRow;
+    private int batterySectionRow;
+    private int batteryForegroundOnlyRow;
+    private int batteryChannelsLazyRow;
+    private int batteryMutedRow;
+    private int batterySyncRow;
+    private int batteryInfoRow;
 
     private int rowCount;
 
@@ -168,6 +175,13 @@ public class DataSettingsActivity extends BaseFragment {
         }
         mediaDownloadSection2Row = rowCount++;
 
+        batterySectionRow = rowCount++;
+        batteryForegroundOnlyRow = rowCount++;
+        batteryChannelsLazyRow = rowCount++;
+        batteryMutedRow = rowCount++;
+        batterySyncRow = rowCount++;
+        batteryInfoRow = rowCount++;
+
         saveToGallerySectionRow = rowCount++;
         saveToGalleryPeerRow = rowCount++;
         saveToGalleryGroupsRow = rowCount++;
@@ -202,6 +216,17 @@ public class DataSettingsActivity extends BaseFragment {
 
         if (listAdapter != null && fullNotify) {
             listAdapter.notifyDataSetChanged();
+        }
+    }
+
+    private static String batterySyncModeName(int mode) {
+        switch (mode) {
+            case BatteryPolicy.SYNC_ALWAYS:
+                return LocaleController.getString(R.string.BatterySyncAlways);
+            case BatteryPolicy.SYNC_NEVER:
+                return LocaleController.getString(R.string.BatterySyncNever);
+            default:
+                return LocaleController.getString(R.string.BatterySyncWifiOrCharging);
         }
     }
 
@@ -317,6 +342,37 @@ public class DataSettingsActivity extends BaseFragment {
                     presentFragment(new SaveToGallerySettingsActivity(bundle));
                 }
 
+            } else if (position == batteryForegroundOnlyRow) {
+                BatteryPolicy.setDownloadMediaInBackground(!BatteryPolicy.downloadMediaInBackground());
+                if (view instanceof TextCheckCell) {
+                    ((TextCheckCell) view).setChecked(!BatteryPolicy.downloadMediaInBackground());
+                }
+                if (BatteryPolicy.downloadMediaInBackground()) {
+                    BatteryPolicy.onAppForeground();
+                }
+            } else if (position == batteryChannelsLazyRow) {
+                BatteryPolicy.setPrefetchChannelMedia(!BatteryPolicy.prefetchChannelMedia());
+                if (view instanceof TextCheckCell) {
+                    ((TextCheckCell) view).setChecked(!BatteryPolicy.prefetchChannelMedia());
+                }
+            } else if (position == batteryMutedRow) {
+                BatteryPolicy.setPrefetchMutedMedia(!BatteryPolicy.prefetchMutedMedia());
+                if (view instanceof TextCheckCell) {
+                    ((TextCheckCell) view).setChecked(!BatteryPolicy.prefetchMutedMedia());
+                }
+            } else if (position == batterySyncRow) {
+                Dialog dlg = AlertsCreator.createSingleChoiceDialog(getParentActivity(), new String[]{
+                                batterySyncModeName(BatteryPolicy.SYNC_ALWAYS),
+                                batterySyncModeName(BatteryPolicy.SYNC_WIFI_OR_CHARGING),
+                                batterySyncModeName(BatteryPolicy.SYNC_NEVER)},
+                        LocaleController.getString(R.string.BatterySync), BatteryPolicy.backgroundSyncMode(), (dialog, which) -> {
+                            BatteryPolicy.setBackgroundSyncMode(which);
+                            if (listAdapter != null) {
+                                listAdapter.notifyItemChanged(position);
+                            }
+                        });
+                setVisibleDialog(dlg);
+                dlg.show();
             } else if (position == mobileRow || position == roamingRow || position == wifiRow) {
                 if (LocaleController.isRTL && x <= AndroidUtilities.dp(76) || !LocaleController.isRTL && x >= view.getMeasuredWidth() - AndroidUtilities.dp(76)) {
                     boolean wasEnabled = listAdapter.isRowEnabled(resetDownloadRow);
@@ -692,7 +748,10 @@ public class DataSettingsActivity extends BaseFragment {
                     TextSettingsCell textCell = (TextSettingsCell) holder.itemView;
                     textCell.setCanDisable(false);
                     textCell.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-                    if (position == useLessDataForCallsRow) {
+                    if (position == batterySyncRow) {
+                        textCell.setIcon(0);
+                        textCell.setTextAndValue(LocaleController.getString(R.string.BatterySync), batterySyncModeName(BatteryPolicy.backgroundSyncMode()), false);
+                    } else if (position == useLessDataForCallsRow) {
                         textCell.setIcon(0);
                         SharedPreferences preferences = MessagesController.getGlobalMainSettings();
                         String value = null;
@@ -745,6 +804,8 @@ public class DataSettingsActivity extends BaseFragment {
                         headerCell.setText(LocaleController.getString(R.string.AutoplayMedia));
                     } else if (position == saveToGallerySectionRow) {
                         headerCell.setText(LocaleController.getString(R.string.SaveToGallerySettings));
+                    } else if (position == batterySectionRow) {
+                        headerCell.setText(LocaleController.getString(R.string.BatterySection));
                     }
                     break;
                 }
@@ -762,6 +823,12 @@ public class DataSettingsActivity extends BaseFragment {
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.AutoplayGIF), SharedConfig.isAutoplayGifs(), true);
                     } else if (position == autoplayVideoRow) {
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.AutoplayVideo), SharedConfig.isAutoplayVideo(), false);
+                    } else if (position == batteryForegroundOnlyRow) {
+                        checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryForegroundOnly), !BatteryPolicy.downloadMediaInBackground(), true);
+                    } else if (position == batteryChannelsLazyRow) {
+                        checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryChannelsLazy), !BatteryPolicy.prefetchChannelMedia(), true);
+                    } else if (position == batteryMutedRow) {
+                        checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryMutedLazy), !BatteryPolicy.prefetchMutedMedia(), true);
                     }
                     break;
                 }
@@ -769,6 +836,8 @@ public class DataSettingsActivity extends BaseFragment {
                     TextInfoPrivacyCell cell = (TextInfoPrivacyCell) holder.itemView;
                     if (position == enableAllStreamInfoRow) {
                         cell.setText(LocaleController.getString(R.string.EnableAllStreamingInfo));
+                    } else if (position == batteryInfoRow) {
+                        cell.setText(LocaleController.getString(R.string.BatteryInfo));
                     }
                     break;
                 }
@@ -928,11 +997,11 @@ public class DataSettingsActivity extends BaseFragment {
         public int getItemViewType(int position) {
             if (position == mediaDownloadSection2Row || position == usageSection2Row || position == callsSection2Row || position == proxySection2Row || position == autoplaySectionRow || position == clearDraftsSectionRow || position == saveToGalleryDividerRow) {
                 return 0;
-            } else if (position == mediaDownloadSectionRow || position == streamSectionRow || position == callsSectionRow || position == usageSectionRow || position == proxySectionRow || position == autoplayHeaderRow || position == saveToGallerySectionRow) {
+            } else if (position == mediaDownloadSectionRow || position == streamSectionRow || position == callsSectionRow || position == usageSectionRow || position == proxySectionRow || position == autoplayHeaderRow || position == saveToGallerySectionRow || position == batterySectionRow) {
                 return 2;
-            } else if (position == enableCacheStreamRow || position == enableStreamRow || position == enableAllStreamRow || position == enableMkvRow || position == autoplayGifsRow || position == autoplayVideoRow) {
+            } else if (position == enableCacheStreamRow || position == enableStreamRow || position == enableAllStreamRow || position == enableMkvRow || position == autoplayGifsRow || position == autoplayVideoRow || position == batteryForegroundOnlyRow || position == batteryChannelsLazyRow || position == batteryMutedRow) {
                 return 3;
-            } else if (position == enableAllStreamInfoRow) {
+            } else if (position == enableAllStreamInfoRow || position == batteryInfoRow) {
                 return 4;
             } else if (position == mobileRow || position == wifiRow || position == roamingRow || position == saveToGalleryGroupsRow || position == saveToGalleryPeerRow || position == saveToGalleryChannelsRow) {
                 return 5;

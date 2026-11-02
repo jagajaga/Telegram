@@ -1521,11 +1521,11 @@ public class PushListenerController {
                     }
 
                     ConnectionsManager.onInternalPushReceived(currentAccount);
-                    ConnectionsManager.getInstance(currentAccount).resumeNetworkMaybe();
+                    ConnectionsManager.getInstance(currentAccount).resumeNetworkForPush(loc_key);
                 } catch (Throwable e) {
                     if (currentAccount != -1) {
                         ConnectionsManager.onInternalPushReceived(currentAccount);
-                        ConnectionsManager.getInstance(currentAccount).resumeNetworkMaybe();
+                        ConnectionsManager.getInstance(currentAccount).resumeNetworkForPush(loc_key);
                         countDownLatch.countDown();
                     } else {
                         onDecryptError();
@@ -1767,7 +1767,7 @@ public class PushListenerController {
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
             if (UserConfig.getInstance(a).isClientActivated()) {
                 ConnectionsManager.onInternalPushReceived(a);
-                ConnectionsManager.getInstance(a).resumeNetworkMaybe();
+                ConnectionsManager.getInstance(a).resumeNetworkForPush(null);
             }
         }
         countDownLatch.countDown();

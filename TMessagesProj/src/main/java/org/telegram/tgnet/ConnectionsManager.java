@@ -737,6 +737,17 @@ public class ConnectionsManager extends BaseController {
         native_resumeNetwork(currentAccount, true);
     }
 
+    /** A push arrived: wake the socket to sync, unless the fork's background sync policy says the notification is enough for now. */
+    public void resumeNetworkForPush(String locKey) {
+        if (!org.telegram.messenger.BatteryPolicy.shouldSyncOnPush(locKey)) {
+            if (BuildVars.LOGS_ENABLED) {
+                FileLog.d("push " + locKey + ": not waking the network (battery policy)");
+            }
+            return;
+        }
+        native_resumeNetwork(currentAccount, true);
+    }
+
     public void updateDcSettings() {
         native_updateDcSettings(currentAccount);
     }

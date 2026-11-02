@@ -1130,7 +1130,7 @@ public class DownloadController extends BaseController implements NotificationCe
     }
 
     protected void processDownloadObjects(int type, ArrayList<DownloadObject> objects) {
-        if (objects.isEmpty()) {
+        if (objects.isEmpty() || !BatteryPolicy.canAutoDownloadNow()) {
             return;
         }
         ArrayList<DownloadObject> queue;
@@ -1187,6 +1187,9 @@ public class DownloadController extends BaseController implements NotificationCe
     }
 
     protected void newDownloadObjectsAvailable(int downloadMask) {
+        if (!BatteryPolicy.canAutoDownloadNow()) {
+            return;
+        }
         int mask = getCurrentDownloadMask();
         if ((mask & AUTODOWNLOAD_TYPE_PHOTO) != 0 && (downloadMask & AUTODOWNLOAD_TYPE_PHOTO) != 0 && photoDownloadQueue.isEmpty()) {
             getMessagesStorage().getDownloadQueue(AUTODOWNLOAD_TYPE_PHOTO);
@@ -1749,6 +1752,9 @@ public class DownloadController extends BaseController implements NotificationCe
     }
 
     public boolean canPreloadStories() {
+        if (!BatteryPolicy.canAutoDownloadNow()) {
+            return false;
+        }
         Preset preset;
         int networkType = ApplicationLoader.getAutodownloadNetworkType();
         if (networkType == StatsController.TYPE_WIFI) {

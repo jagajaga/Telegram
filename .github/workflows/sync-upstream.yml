@@ -1,0 +1,61 @@
+name: sync upstream
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  merge:
+    name: merge DrKLO/Telegram master into release
+    runs-on: ubuntu-latest
+    outputs:
+      merged: ${{ steps.merge.outputs.merged }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release
+          fetch-depth: 0
+
+      - name: Merge
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/DrKLO/Telegram.git
+          git fetch upstream master
+          if git merge-base --is-ancestor upstream/master HEAD; then
+            echo "already up to date with upstream $(git rev-parse --short upstream/master)"
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version=$(git show upstream/master:gradle.properties | sed -n 's/^APP_VERSION_NAME=//p')
+          if git merge --no-edit -m "chore: merge upstream telegram ${version}" upstream/master; then
+            git push origin release
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            title="upstream sync conflict: telegram ${version}"
+            if [ -z "$(gh issue list --search "\"$title\" in:title" --state open --json number --jq '.[0].number')" ]; then
+              gh issue create --title "$title" --body "Automatic merge of DrKLO/Telegram master ($(git rev-parse --short upstream/master)) into \`release\` has conflicts in:
+
+          $(git diff --name-only --diff-filter=U | sed 's/^/- /')
+
+          Resolve locally: \`git fetch upstream && git merge upstream/master\` on \`release\`, then push."
+            fi
+            exit 1
+          fi
+
+  build:
+    needs: merge
+    if: needs.merge.outputs.merged == 'true'
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: release
+      release: true
+    secrets: inherit

@@ -9,17 +9,35 @@ on:
         description: 'Comma-separated ABIs to build'
         default: 'arm64-v8a'
         required: true
+      release:
+        description: 'Publish a release (becomes the in-app update)'
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref to build'
+        type: string
+        required: true
+      abi:
+        type: string
+        default: 'arm64-v8a'
+      release:
+        type: boolean
+        default: true
 
 permissions:
   contents: write
 
 jobs:
   apk:
-    name: debug apk (${{ inputs.abi || 'arm64-v8a' }})
+    name: beta apk (${{ inputs.abi || 'arm64-v8a' }})
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
       ABI: ${{ inputs.abi || 'arm64-v8a' }}
+      DO_RELEASE: ${{ inputs.release == true || github.ref_name == 'release' }}
+      UPDATE_URL: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
     steps:
       - name: Free disk space
         run: |
@@ -28,6 +46,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 1
 
       - name: Submodules at their pinned commits (shallow)
@@ -43,32 +62,88 @@ jobs:
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "cmake;3.22.1" "platforms;android-36" "build-tools;36.0.0" > /dev/null
           echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          printf 'sdk.dir=%s\nBETA_PUBLIC_URL=%s\n' "$ANDROID_SDK_ROOT" "$UPDATE_URL" > local.properties
+
+      - name: Signing key and API credentials from secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          TELEGRAM_APP_ID: ${{ secrets.TELEGRAM_APP_ID }}
+          TELEGRAM_APP_HASH: ${{ secrets.TELEGRAM_APP_HASH }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > TMessagesProj/config/release.keystore
+            echo "signing: fork keystore"
+          else
+            echo "::warning::KEYSTORE_BASE64 not set, signing with the public repository keystore"
+          fi
+          if [ -n "$TELEGRAM_APP_ID" ] && [ -n "$TELEGRAM_APP_HASH" ]; then
+            sed -i -E "s/APP_ID = [0-9]+;/APP_ID = ${TELEGRAM_APP_ID};/; s/APP_HASH = \"[0-9a-f]*\"/APP_HASH = \"${TELEGRAM_APP_HASH}\"/" TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java
+            echo "api credentials: own"
+          else
+            echo "::warning::TELEGRAM_APP_ID / TELEGRAM_APP_HASH not set, building with Telegram's test credentials"
+          fi
+
+      - name: Version
+        id: version
+        run: |
+          upstream_code=$(sed -n 's/^APP_VERSION_CODE=//p' gradle.properties)
+          name=$(sed -n 's/^APP_VERSION_NAME=//p' gradle.properties)
+          code=$((upstream_code * 1000 + GITHUB_RUN_NUMBER))
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "tag=v${name}-fork.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "version $name, code $code (upstream $upstream_code)"
 
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Build
-        run: ./gradlew --no-daemon :TMessagesProj_App:assembleAfatDebug -PabiFilters="$ABI"
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          args=(-PabiFilters="$ABI" -PAPP_VERSION_CODE=${{ steps.version.outputs.code }} -PDEBUG_VERSION=false)
+          if [ -n "$KEYSTORE_PASSWORD" ]; then
+            args+=(-PRELEASE_STORE_PASSWORD="$KEYSTORE_PASSWORD" -PRELEASE_KEY_PASSWORD="$KEYSTORE_PASSWORD" -PRELEASE_KEY_ALIAS="${KEY_ALIAS:-telegram-fork}")
+          fi
+          ./gradlew --no-daemon :TMessagesProj_AppHockeyApp:assembleAfatHA_public "${args[@]}"
 
-      - name: Rename apk
+      - name: Package
         id: apk
         run: |
-          src=$(ls TMessagesProj_App/build/outputs/apk/afat/debug/*.apk | head -1)
-          out="Telegram-beta-${ABI//,/-}-${GITHUB_SHA::7}.apk"
-          cp "$src" "$out"
-          echo "path=$out" >> "$GITHUB_OUTPUT"
+          src=$(ls TMessagesProj_AppHockeyApp/build/outputs/apk/afat/HA_public/*.apk | head -1)
+          apk="Telegram-fork-${{ steps.version.outputs.name }}-${{ steps.version.outputs.code }}-${ABI//,/-}.apk"
+          cp "$src" "$apk"
+          aapt2="$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt2"
+          installed_code=$("$aapt2" dump badging "$apk" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+          cat > latest.json <<JSON
+          {
+            "version": "${{ steps.version.outputs.name }}",
+            "version_code": ${installed_code},
+            "file_url": "https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/${apk}",
+            "changelog": "$(git log -1 --pretty=%s | sed 's/"/\\"/g')"
+          }
+          JSON
+          cat latest.json
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
           df -h /
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.apk.outputs.path }}
-          path: ${{ steps.apk.outputs.path }}
+          path: |
+            ${{ steps.apk.outputs.path }}
+            latest.json
 
       - name: Release
+        if: env.DO_RELEASE == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="build-${GITHUB_RUN_NUMBER}"
-          gh release create "$tag" --prerelease --target "$GITHUB_SHA" \
-            --title "${GITHUB_REF_NAME} @ ${GITHUB_SHA::7} ($ABI debug)" \
-            --notes "Debug build of \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA}. Package org.telegram.messenger.beta; installs alongside Telegram." \
-            "${{ steps.apk.outputs.path }}"
+          notes="Fork build of \`$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "${GITHUB_REF_NAME}")\` at ${GITHUB_SHA::7}.
+          Package org.telegram.messenger.beta; installs alongside Telegram and updates itself from these releases.
+
+          $(git log -5 --pretty='- %s')"
+          gh release create "${{ steps.version.outputs.tag }}" --latest --target "$GITHUB_SHA" \
+            --title "Telegram fork ${{ steps.version.outputs.name }} (${{ steps.version.outputs.code }})" \
+            --notes "$notes" \
+            "${{ steps.apk.outputs.path }}" latest.json

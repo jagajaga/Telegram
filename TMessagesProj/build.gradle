@@ -190,7 +190,7 @@ android {
             ndk.debugSymbolLevel = 'FULL'
             buildConfigField "String", "BUILD_VERSION_STRING", "\"" + APP_VERSION_NAME + "\""
             buildConfigField "String", "BETA_URL", "\"" + getProps("BETA_PUBLIC_URL") + "\""
-            buildConfigField "boolean", "DEBUG_VERSION", "true"
+            buildConfigField "boolean", "DEBUG_VERSION", project.hasProperty("DEBUG_VERSION") ? project.property("DEBUG_VERSION").toString() : "true"
             buildConfigField "boolean", "DEBUG_PRIVATE_VERSION", "false"
             buildConfigField "boolean", "BUNDLE", "false"
             buildConfigField "int", "VERSION_NUM", "4"

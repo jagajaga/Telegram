@@ -53,6 +53,7 @@ import android.media.MediaMetadataRetriever;
 import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Environment;
 import android.os.PowerManager;
 import android.os.SystemClock;
@@ -61,6 +62,8 @@ import android.provider.OpenableColumns;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
+
+import androidx.annotation.RequiresApi;
 import android.util.Pair;
 import android.util.SparseArray;
 import android.view.HapticFeedbackConstants;
@@ -1027,6 +1030,24 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
     public static ArrayList<AlbumEntry> allPhotoAlbums = new ArrayList<>();
     private static Runnable broadcastPhotosRunnable;
 
+    // Incremental gallery refresh. Every field below is read and written on the UI thread only
+    // (the two volatile ones are also set by whichever thread starts a full scan).
+    private static final int GALLERY_FIRST_PAGE_ROWS = 120;
+    private static final int GALLERY_MAX_INCREMENTAL_ROWS = 200;
+    private static final int GALLERY_MAX_SETTLE_RETRIES = 5;
+    private static final long GALLERY_FULL_SCAN_TIMEOUT_MS = 60_000;
+    private static HashMap<String, Long> galleryGenerations;
+    private static int galleryMaxImageId;
+    private static int galleryMaxVideoId;
+    private static int galleryRowCount = -1;
+    private static Integer galleryMediaCameraAlbumId;
+    private static Integer galleryPhotoCameraAlbumId;
+    private static volatile boolean galleryFullScanRunning;
+    private static volatile long galleryFullScanStartedAt;
+    private static boolean galleryIncrementalRunning;
+    private static boolean galleryRefreshQueued;
+    private static int gallerySettleRetries;
+
     public boolean isSilent = false;
     private boolean isPaused = false;
     private boolean wasPlayingAudioBeforePause = false;
@@ -1264,24 +1285,10 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             super(null);
         }
 
-        private void scheduleReloadRunnable() {
-            AndroidUtilities.runOnUIThread(refreshGalleryRunnable = () -> {
-                if (PhotoViewer.getInstance().isVisible()) {
-                    scheduleReloadRunnable();
-                    return;
-                }
-                refreshGalleryRunnable = null;
-                loadGalleryPhotosAlbums(0);
-            }, 2000);
-        }
-
         @Override
         public void onChange(boolean selfChange) {
             super.onChange(selfChange);
-            if (refreshGalleryRunnable != null) {
-                AndroidUtilities.cancelRunOnUIThread(refreshGalleryRunnable);
-            }
-            scheduleReloadRunnable();
+            scheduleGalleryRefresh(galleryRefreshDebounceMs());
         }
     }
 
@@ -1293,80 +1300,546 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         @Override
         public void onChange(boolean selfChange) {
             super.onChange(selfChange);
+            scheduleGalleryRefresh(galleryRefreshDebounceMs());
+        }
+    }
+
+    /**
+     * From Android 10 MediaStore hides a row until the app writing it clears IS_PENDING, so a short
+     * debounce only coalesces the burst of notifications one capture produces. Before that the row
+     * is visible while the file is still being written, so give it a moment to settle.
+     */
+    private static long galleryRefreshDebounceMs() {
+        return Build.VERSION.SDK_INT >= 29 ? 150 : 1000;
+    }
+
+    /** Called when the app comes to the foreground: pick up whatever other apps wrote while we were away. */
+    public static void checkGallery() {
+        AndroidUtilities.runOnUIThread(MediaController::refreshGallery);
+    }
+
+    /** Any thread. Coalesces a burst of MediaStore notifications into one refresh. */
+    private static void scheduleGalleryRefresh(long delay) {
+        AndroidUtilities.runOnUIThread(() -> {
             if (refreshGalleryRunnable != null) {
                 AndroidUtilities.cancelRunOnUIThread(refreshGalleryRunnable);
             }
             AndroidUtilities.runOnUIThread(refreshGalleryRunnable = () -> {
                 refreshGalleryRunnable = null;
+                refreshGallery();
+            }, delay);
+        });
+    }
+
+    private static boolean isGalleryFullScanRunning() {
+        return galleryFullScanRunning && SystemClock.elapsedRealtime() - galleryFullScanStartedAt < GALLERY_FULL_SCAN_TIMEOUT_MS;
+    }
+
+    /**
+     * UI thread. Bring the gallery snapshot up to date right now.
+     * <p>
+     * With a snapshot in place this is a delta query (rows changed since the snapshot's MediaStore
+     * generation, or rows with a higher _id on Android < 11) merged into the existing album lists,
+     * which is a few milliseconds instead of a rescan of every row. Anything the delta cannot express
+     * — a deletion, a row edited in place, a row count that does not add up — falls back to the full
+     * scan. Without a snapshot it starts the full scan.
+     */
+    public static void refreshGallery() {
+        if (refreshGalleryRunnable != null) {
+            AndroidUtilities.cancelRunOnUIThread(refreshGalleryRunnable);
+            refreshGalleryRunnable = null;
+        }
+        if (isGalleryFullScanRunning() || galleryIncrementalRunning) {
+            galleryRefreshQueued = true;
+            return;
+        }
+        if (!hasGalleryPermission()) {
+            if (galleryRowCount < 0) {
                 loadGalleryPhotosAlbums(0);
-            }, 2000);
+            }
+            return;
+        }
+        if (galleryRowCount < 0 || allMediaAlbumEntry == null) {
+            loadGalleryPhotosAlbums(0);
+            return;
+        }
+        galleryIncrementalRunning = true;
+        final HashMap<String, Long> knownGenerations = galleryGenerations;
+        final int knownMaxImageId = galleryMaxImageId;
+        final int knownMaxVideoId = galleryMaxVideoId;
+        Utilities.globalQueue.postRunnable(() -> {
+            GalleryDelta delta;
+            try {
+                delta = queryGalleryDelta(knownGenerations, knownMaxImageId, knownMaxVideoId);
+            } catch (Throwable e) {
+                FileLog.e(e);
+                delta = new GalleryDelta();
+                delta.needsFullScan = true;
+            }
+            final GalleryDelta result = delta;
+            AndroidUtilities.runOnUIThread(() -> applyGalleryDelta(result));
+        });
+    }
+
+    private static void drainQueuedGalleryRefresh() {
+        if (galleryRefreshQueued) {
+            galleryRefreshQueued = false;
+            refreshGallery();
         }
     }
 
-    public static void checkGallery() {
-        if (Build.VERSION.SDK_INT < 24 || allPhotosAlbumEntry == null) {
+    private static boolean hasGalleryPermission() {
+        if (Build.VERSION.SDK_INT < 23) {
+            return true;
+        }
+        final Context context = ApplicationLoader.applicationContext;
+        if (Build.VERSION.SDK_INT >= 33) {
+            return context.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED ||
+                context.checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED ||
+                context.checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED;
+        }
+        return context.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private static String galleryDateColumn() {
+        return Build.VERSION.SDK_INT > 28 ? MediaStore.MediaColumns.DATE_MODIFIED : MediaStore.Images.Media.DATE_TAKEN;
+    }
+
+    private static String cameraFolderPath() {
+        try {
+            return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM).getAbsolutePath() + "/" + "Camera/";
+        } catch (Exception e) {
+            FileLog.e(e);
+            return null;
+        }
+    }
+
+    /**
+     * MediaStore generation counter of every external volume (Android 11+). Each is monotonic and
+     * changes on any insert, update or delete on that volume; a row's GENERATION_MODIFIED is read
+     * against its own volume's counter. Empty when they could not be read.
+     */
+    @RequiresApi(api = 30)
+    private static HashMap<String, Long> readGalleryGenerations() {
+        final HashMap<String, Long> generations = new HashMap<>();
+        try {
+            final Context context = ApplicationLoader.applicationContext;
+            for (String volume : MediaStore.getExternalVolumeNames(context)) {
+                try {
+                    generations.put(volume, MediaStore.getGeneration(context, volume));
+                } catch (Exception ignore) {
+                }
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+        return generations;
+    }
+
+    private static class GalleryRow {
+        final PhotoEntry entry;
+        final String bucketName;
+
+        GalleryRow(PhotoEntry entry, String bucketName) {
+            this.entry = entry;
+            this.bucketName = bucketName;
+        }
+    }
+
+    private static class GalleryDelta {
+        boolean unchanged;
+        boolean needsFullScan;
+        boolean notSettled;
+        HashMap<String, Long> generations;
+        int rowCount = -1;
+        int skippedRows;
+        int maxImageId;
+        int maxVideoId;
+        final ArrayList<GalleryRow> rows = new ArrayList<>();
+    }
+
+    /** State recorded by a full scan so that later deltas know where to start from. */
+    private static class GalleryScanState {
+        final HashMap<String, Long> generations;
+        final int maxImageId;
+        final int maxVideoId;
+        final int rowCount;
+        final Integer mediaCameraAlbumId;
+        final Integer photoCameraAlbumId;
+
+        GalleryScanState(HashMap<String, Long> generations, int maxImageId, int maxVideoId, int rowCount, Integer mediaCameraAlbumId, Integer photoCameraAlbumId) {
+            this.generations = generations;
+            this.maxImageId = maxImageId;
+            this.maxVideoId = maxVideoId;
+            this.rowCount = rowCount;
+            this.mediaCameraAlbumId = mediaCameraAlbumId;
+            this.photoCameraAlbumId = photoCameraAlbumId;
+        }
+    }
+
+    /**
+     * Reads up to {@code limit} rows (or all when limit <= 0) into {@code delta.rows}; rows with an
+     * empty path are counted in {@code delta.skippedRows}. The highest _id seen, skipped or not,
+     * goes to {@code delta.maxImageId} / {@code maxVideoId}.
+     */
+    private static void readGalleryRows(Cursor cursor, boolean isVideo, int limit, GalleryDelta delta) {
+        final ArrayList<GalleryRow> out = delta.rows;
+        int imageIdColumn = cursor.getColumnIndex(MediaStore.MediaColumns._ID);
+        int bucketIdColumn = cursor.getColumnIndex(MediaStore.Images.Media.BUCKET_ID);
+        int bucketNameColumn = cursor.getColumnIndex(MediaStore.Images.Media.BUCKET_DISPLAY_NAME);
+        int dataColumn = cursor.getColumnIndex(MediaStore.MediaColumns.DATA);
+        int dateColumn = cursor.getColumnIndex(galleryDateColumn());
+        int orientationColumn = isVideo ? -1 : cursor.getColumnIndex(MediaStore.Images.Media.ORIENTATION);
+        int durationColumn = isVideo ? cursor.getColumnIndex(MediaStore.Video.Media.DURATION) : -1;
+        int widthColumn = cursor.getColumnIndex(MediaStore.MediaColumns.WIDTH);
+        int heightColumn = cursor.getColumnIndex(MediaStore.MediaColumns.HEIGHT);
+        int sizeColumn = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE);
+        int read = 0;
+        while (cursor.moveToNext() && (limit <= 0 || read < limit)) {
+            read++;
+            int imageId = cursor.getInt(imageIdColumn);
+            if (isVideo) {
+                delta.maxVideoId = Math.max(delta.maxVideoId, imageId);
+            } else {
+                delta.maxImageId = Math.max(delta.maxImageId, imageId);
+            }
+            String path = cursor.getString(dataColumn);
+            if (TextUtils.isEmpty(path)) {
+                delta.skippedRows++;
+                continue;
+            }
+            int bucketId = cursor.getInt(bucketIdColumn);
+            String bucketName = cursor.getString(bucketNameColumn);
+            long dateTaken = cursor.getLong(dateColumn);
+            int width = cursor.getInt(widthColumn);
+            int height = cursor.getInt(heightColumn);
+            long size = cursor.getLong(sizeColumn);
+            PhotoEntry entry;
+            if (isVideo) {
+                long duration = cursor.getLong(durationColumn);
+                entry = new PhotoEntry(bucketId, imageId, dateTaken, path, 0, (int) (duration / 1000), true, width, height, size);
+            } else {
+                int orientation = cursor.getInt(orientationColumn);
+                entry = new PhotoEntry(bucketId, imageId, dateTaken, path, orientation, 0, false, width, height, size);
+            }
+            out.add(new GalleryRow(entry, bucketName));
+        }
+    }
+
+    private static int countGalleryRows(ContentResolver resolver, Uri uri) {
+        Cursor cursor = null;
+        try {
+            cursor = resolver.query(uri, new String[]{MediaStore.MediaColumns._ID}, null, null, null);
+            return cursor != null ? cursor.getCount() : 0;
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+    }
+
+    private static void readGalleryRows(ContentResolver resolver, Uri uri, String[] projection, String selection, String[] selectionArgs, boolean isVideo, GalleryDelta delta) {
+        Cursor cursor = null;
+        try {
+            cursor = resolver.query(uri, projection, selection, selectionArgs, galleryDateColumn() + " DESC");
+            if (cursor != null) {
+                readGalleryRows(cursor, isVideo, 0, delta);
+            }
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+    }
+
+    /** Background thread. */
+    private static GalleryDelta queryGalleryDelta(HashMap<String, Long> knownGenerations, int knownMaxImageId, int knownMaxVideoId) {
+        final GalleryDelta delta = new GalleryDelta();
+        final ContentResolver resolver = ApplicationLoader.applicationContext.getContentResolver();
+        if (Build.VERSION.SDK_INT >= 30) {
+            delta.generations = readGalleryGenerations();
+        }
+        if (Build.VERSION.SDK_INT >= 30 && knownGenerations != null && !knownGenerations.isEmpty() && !delta.generations.isEmpty()) {
+            if (delta.generations.equals(knownGenerations)) {
+                delta.unchanged = true;
+                return delta;
+            }
+            if (!delta.generations.keySet().equals(knownGenerations.keySet())) {
+                // a volume was mounted or removed
+                delta.needsFullScan = true;
+                return delta;
+            }
+            final String selection = MediaStore.MediaColumns.GENERATION_MODIFIED + " > ?";
+            for (String volume : knownGenerations.keySet()) {
+                final long known = knownGenerations.get(volume);
+                if (known == delta.generations.get(volume)) {
+                    continue;
+                }
+                final String[] args = {String.valueOf(known)};
+                readGalleryRows(resolver, MediaStore.Images.Media.getContentUri(volume), projectionPhotos, selection, args, false, delta);
+                readGalleryRows(resolver, MediaStore.Video.Media.getContentUri(volume), projectionVideo, selection, args, true, delta);
+            }
+        } else {
+            final String selection = MediaStore.MediaColumns._ID + " > ?";
+            readGalleryRows(resolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, projectionPhotos, selection, new String[]{String.valueOf(knownMaxImageId)}, false, delta);
+            readGalleryRows(resolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, projectionVideo, selection, new String[]{String.valueOf(knownMaxVideoId)}, true, delta);
+        }
+        if (delta.rows.size() > GALLERY_MAX_INCREMENTAL_ROWS) {
+            delta.needsFullScan = true;
+            return delta;
+        }
+        if (Build.VERSION.SDK_INT < 29) {
+            // the row can be visible before the file is fully written
+            for (int i = 0; i < delta.rows.size(); i++) {
+                PhotoEntry entry = delta.rows.get(i).entry;
+                if (new File(entry.path).length() == 0) {
+                    delta.notSettled = true;
+                    return delta;
+                }
+            }
+        }
+        delta.rowCount = countGalleryRows(resolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI) + countGalleryRows(resolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI);
+        for (int i = 0; i < Math.min(15, delta.rows.size()); i++) {
+            PhotoEntry entry = delta.rows.get(i).entry;
+            if (!entry.isVideo) {
+                // same XMP preload the full scan does for the newest photos
+                entry.isLivePhoto();
+            }
+        }
+        return delta;
+    }
+
+    /** UI thread. */
+    private static void applyGalleryDelta(GalleryDelta delta) {
+        if (delta != null && !delta.unchanged && !delta.needsFullScan && PhotoViewer.getInstance().isVisible() && !forceBroadcastNewPhotos) {
+            // the viewer iterates these lists; merge this same delta once it is closed
+            AndroidUtilities.runOnUIThread(() -> applyGalleryDelta(delta), 1000);
             return;
         }
-        final int prevSize = allPhotosAlbumEntry.photos.size();
-        Utilities.globalQueue.postRunnable(() -> {
-            int count = 0;
+        galleryIncrementalRunning = false;
+        if (delta == null || delta.unchanged) {
+            drainQueuedGalleryRefresh();
+            return;
+        }
+        if (delta.notSettled && gallerySettleRetries < GALLERY_MAX_SETTLE_RETRIES) {
+            gallerySettleRetries++;
+            scheduleGalleryRefresh(500);
+            return;
+        }
+        gallerySettleRetries = 0;
+        boolean full = delta.needsFullScan;
+        int added = 0;
+        int maxImageId = Math.max(galleryMaxImageId, delta.maxImageId);
+        int maxVideoId = Math.max(galleryMaxVideoId, delta.maxVideoId);
+        if (!full) {
+            for (int i = 0; i < delta.rows.size(); i++) {
+                GalleryRow row = delta.rows.get(i);
+                PhotoEntry entry = row.entry;
+                PhotoEntry existing = allMediaAlbumEntry != null ? allMediaAlbumEntry.photosByIds.get(entry.imageId) : null;
+                if (existing == null) {
+                    if (insertGalleryEntry(entry, row.bucketName)) {
+                        added++;
+                    }
+                } else if (existing.isVideo != entry.isVideo || existing.dateTaken != entry.dateTaken || existing.size != entry.size || !TextUtils.equals(existing.path, entry.path)) {
+                    full = true;
+                    break;
+                }
+            }
+        }
+        if (!full && delta.rowCount >= 0 && delta.rowCount != galleryRowCount + added + delta.skippedRows) {
+            full = true;
+        }
+        if (full) {
+            loadGalleryPhotosAlbums(0);
+            return;
+        }
+        galleryGenerations = delta.generations;
+        galleryMaxImageId = maxImageId;
+        galleryMaxVideoId = maxVideoId;
+        galleryRowCount += added + delta.skippedRows;
+        if (added > 0) {
+            NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.albumsDidLoad, 0, allMediaAlbums, allPhotoAlbums, galleryMediaCameraAlbumId);
+        }
+        drainQueuedGalleryRefresh();
+    }
+
+    /** UI thread. Mirrors the album bookkeeping of the full scan for one new row. */
+    private static boolean insertGalleryEntry(PhotoEntry entry, String bucketName) {
+        if (allMediaAlbumEntry == null) {
+            allMediaAlbumEntry = new AlbumEntry(0, LocaleController.getString(R.string.AllMedia), entry);
+            allMediaAlbums.add(0, allMediaAlbumEntry);
+        }
+        if (allMediaAlbumEntry.photosByIds.get(entry.imageId) != null) {
+            return false;
+        }
+        insertSortedByDate(allMediaAlbumEntry, entry);
+        if (entry.isVideo) {
+            if (allVideosAlbumEntry == null) {
+                allVideosAlbumEntry = new AlbumEntry(0, LocaleController.getString(R.string.AllVideos), entry);
+                allVideosAlbumEntry.videoOnly = true;
+                int index = (allMediaAlbumEntry != null ? 1 : 0) + (allPhotosAlbumEntry != null ? 1 : 0);
+                allMediaAlbums.add(Math.min(index, allMediaAlbums.size()), allVideosAlbumEntry);
+            }
+            insertSortedByDate(allVideosAlbumEntry, entry);
+        } else {
+            if (allPhotosAlbumEntry == null) {
+                allPhotosAlbumEntry = new AlbumEntry(0, LocaleController.getString(R.string.AllPhotos), entry);
+                allPhotoAlbums.add(0, allPhotosAlbumEntry);
+            }
+            insertSortedByDate(allPhotosAlbumEntry, entry);
+        }
+        final String cameraFolder = cameraFolderPath();
+        final boolean inCameraFolder = cameraFolder != null && entry.path != null && entry.path.startsWith(cameraFolder);
+
+        AlbumEntry album = findBucketAlbum(allMediaAlbums, entry.bucketId);
+        if (album == null) {
+            album = new AlbumEntry(entry.bucketId, bucketName, entry);
+            if (galleryMediaCameraAlbumId == null && inCameraFolder) {
+                allMediaAlbums.add(0, album);
+                galleryMediaCameraAlbumId = entry.bucketId;
+            } else {
+                addBucketAlbum(allMediaAlbums, album, galleryMediaCameraAlbumId);
+            }
+        }
+        insertSortedByDate(album, entry);
+
+        if (!entry.isVideo) {
+            album = findBucketAlbum(allPhotoAlbums, entry.bucketId);
+            if (album == null) {
+                album = new AlbumEntry(entry.bucketId, bucketName, entry);
+                if (galleryPhotoCameraAlbumId == null && inCameraFolder) {
+                    allPhotoAlbums.add(0, album);
+                    galleryPhotoCameraAlbumId = entry.bucketId;
+                } else {
+                    addBucketAlbum(allPhotoAlbums, album, galleryPhotoCameraAlbumId);
+                }
+            }
+            insertSortedByDate(album, entry);
+        }
+        return true;
+    }
+
+    /** The scan lists bucket albums in order of their newest item; keep a new one in that order. */
+    private static void addBucketAlbum(ArrayList<AlbumEntry> albums, AlbumEntry album, Integer cameraAlbumId) {
+        int index = albums.size();
+        for (int i = 0; i < albums.size(); i++) {
+            AlbumEntry other = albums.get(i);
+            if (other == allMediaAlbumEntry || other == allPhotosAlbumEntry || other == allVideosAlbumEntry || cameraAlbumId != null && other.bucketId == cameraAlbumId) {
+                continue;
+            }
+            if (other.coverPhoto == null || other.coverPhoto.dateTaken < album.coverPhoto.dateTaken) {
+                index = i;
+                break;
+            }
+        }
+        albums.add(index, album);
+    }
+
+    private static AlbumEntry findBucketAlbum(ArrayList<AlbumEntry> albums, int bucketId) {
+        for (int i = 0; i < albums.size(); i++) {
+            AlbumEntry album = albums.get(i);
+            if (album == allMediaAlbumEntry || album == allPhotosAlbumEntry || album == allVideosAlbumEntry) {
+                continue;
+            }
+            if (album.bucketId == bucketId) {
+                return album;
+            }
+        }
+        return null;
+    }
+
+    /** Album lists are newest first; a fresh photo almost always lands at index 0. */
+    private static void insertSortedByDate(AlbumEntry album, PhotoEntry entry) {
+        if (album.photosByIds.get(entry.imageId) != null) {
+            return;
+        }
+        int index = 0;
+        final int count = album.photos.size();
+        while (index < count && album.photos.get(index).dateTaken >= entry.dateTaken) {
+            index++;
+        }
+        album.photos.add(index, entry);
+        album.photosByIds.put(entry.imageId, entry);
+        if (index == 0) {
+            album.coverPhoto = entry;
+        }
+    }
+
+    private static Cursor queryNewestGalleryRows(ContentResolver resolver, Uri uri, String[] projection, int limit) {
+        final String order = galleryDateColumn() + " DESC";
+        if (Build.VERSION.SDK_INT >= 30) {
+            Bundle args = new Bundle();
+            args.putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, order);
+            args.putInt(ContentResolver.QUERY_ARG_LIMIT, limit);
+            return resolver.query(uri, projection, args, null);
+        }
+        return resolver.query(uri, projection, null, null, order + " LIMIT " + limit);
+    }
+
+    /**
+     * Scan thread. Publishes the newest rows as a provisional snapshot so the first attach sheet
+     * after a cold start has something to draw while the full scan walks the whole library.
+     */
+    private static void broadcastFirstGalleryPage(int guid) {
+        try {
+            final ContentResolver resolver = ApplicationLoader.applicationContext.getContentResolver();
+            final GalleryDelta page = new GalleryDelta();
+            final ArrayList<GalleryRow> rows = page.rows;
             Cursor cursor = null;
             try {
-                final Context context = ApplicationLoader.applicationContext;
-                if (
-                    Build.VERSION.SDK_INT >= 33 && (
-                        context.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED ||
-                        context.checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED ||
-                        context.checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
-                    ) ||
-                    context.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
-                ) {
-                    cursor = MediaStore.Images.Media.query(context.getContentResolver(), MediaStore.Images.Media.EXTERNAL_CONTENT_URI, new String[]{"COUNT(_id)"}, null, null, null);
-                    if (cursor != null) {
-                        if (cursor.moveToNext()) {
-                            count += cursor.getInt(0);
-                        }
-                    }
+                cursor = queryNewestGalleryRows(resolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, projectionPhotos, GALLERY_FIRST_PAGE_ROWS);
+                if (cursor != null) {
+                    readGalleryRows(cursor, false, GALLERY_FIRST_PAGE_ROWS, page);
                 }
-            } catch (Throwable e) {
-                FileLog.e(e);
             } finally {
                 if (cursor != null) {
                     cursor.close();
                 }
+                cursor = null;
             }
             try {
-                final Context context = ApplicationLoader.applicationContext;
-                if (
-                    Build.VERSION.SDK_INT >= 33 && (
-                        context.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED ||
-                        context.checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED ||
-                        context.checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
-                    ) ||
-                    context.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
-                ) {
-                    cursor = MediaStore.Images.Media.query(context.getContentResolver(), MediaStore.Video.Media.EXTERNAL_CONTENT_URI, new String[]{"COUNT(_id)"}, null, null, null);
-                    if (cursor != null) {
-                        if (cursor.moveToNext()) {
-                            count += cursor.getInt(0);
-                        }
-                    }
+                cursor = queryNewestGalleryRows(resolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, projectionVideo, GALLERY_FIRST_PAGE_ROWS);
+                if (cursor != null) {
+                    readGalleryRows(cursor, true, GALLERY_FIRST_PAGE_ROWS, page);
                 }
-            } catch (Throwable e) {
-                FileLog.e(e);
             } finally {
                 if (cursor != null) {
                     cursor.close();
                 }
             }
-            if (prevSize != count) {
-                if (refreshGalleryRunnable != null) {
-                    AndroidUtilities.cancelRunOnUIThread(refreshGalleryRunnable);
-                    refreshGalleryRunnable = null;
-                }
-                loadGalleryPhotosAlbums(0);
+            if (rows.isEmpty()) {
+                return;
             }
-        }, 2000);
+            Collections.sort(rows, (o1, o2) -> Long.compare(o2.entry.dateTaken, o1.entry.dateTaken));
+            final ArrayList<AlbumEntry> mediaAlbums = new ArrayList<>();
+            final ArrayList<AlbumEntry> photoAlbums = new ArrayList<>();
+            AlbumEntry allMedia = null, allPhotos = null, allVideos = null;
+            for (int i = 0; i < rows.size(); i++) {
+                PhotoEntry entry = rows.get(i).entry;
+                if (allMedia == null) {
+                    allMedia = new AlbumEntry(0, LocaleController.getString(R.string.AllMedia), entry);
+                    mediaAlbums.add(allMedia);
+                }
+                allMedia.addPhoto(entry);
+                if (entry.isVideo) {
+                    if (allVideos == null) {
+                        allVideos = new AlbumEntry(0, LocaleController.getString(R.string.AllVideos), entry);
+                        allVideos.videoOnly = true;
+                        mediaAlbums.add(allVideos);
+                    }
+                    allVideos.addPhoto(entry);
+                } else {
+                    if (allPhotos == null) {
+                        allPhotos = new AlbumEntry(0, LocaleController.getString(R.string.AllPhotos), entry);
+                        photoAlbums.add(allPhotos);
+                    }
+                    allPhotos.addPhoto(entry);
+                }
+            }
+            broadcastNewPhotos(guid, mediaAlbums, photoAlbums, null, allMedia, allPhotos, allVideos, 0, null);
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
     }
 
 
@@ -6636,7 +7109,17 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
     }
 
     public static void loadGalleryPhotosAlbums(final int guid) {
+        galleryFullScanRunning = true;
+        galleryFullScanStartedAt = SystemClock.elapsedRealtime();
         Thread thread = new Thread(() -> {
+            final HashMap<String, Long> generations = Build.VERSION.SDK_INT >= 30 ? readGalleryGenerations() : null;
+            final boolean hadPermission = hasGalleryPermission();
+            int rowCount = 0;
+            int maxImageId = 0;
+            int maxVideoId = 0;
+            if (hadPermission && allMediaAlbumEntry == null && allPhotosAlbumEntry == null && allVideosAlbumEntry == null) {
+                broadcastFirstGalleryPage(guid);
+            }
             final ArrayList<AlbumEntry> mediaAlbumsSorted = new ArrayList<>();
             final ArrayList<AlbumEntry> photoAlbumsSorted = new ArrayList<>();
             SparseArray<AlbumEntry> mediaAlbums = new SparseArray<>();
@@ -6667,6 +7150,7 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                 ) {
                     cursor = MediaStore.Images.Media.query(context.getContentResolver(), MediaStore.Images.Media.EXTERNAL_CONTENT_URI, projectionPhotos, null, null, (Build.VERSION.SDK_INT > 28 ? MediaStore.Images.Media.DATE_MODIFIED : MediaStore.Images.Media.DATE_TAKEN) + " DESC");
                     if (cursor != null) {
+                        rowCount += cursor.getCount();
                         int imageIdColumn = cursor.getColumnIndex(MediaStore.Images.Media._ID);
                         int bucketIdColumn = cursor.getColumnIndex(MediaStore.Images.Media.BUCKET_ID);
                         int bucketNameColumn = cursor.getColumnIndex(MediaStore.Images.Media.BUCKET_DISPLAY_NAME);
@@ -6678,12 +7162,13 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                         int sizeColumn = cursor.getColumnIndex(MediaStore.Images.Media.SIZE);
 
                         while (cursor.moveToNext()) {
+                            int imageId = cursor.getInt(imageIdColumn);
+                            maxImageId = Math.max(maxImageId, imageId);
                             String path = cursor.getString(dataColumn);
                             if (TextUtils.isEmpty(path)) {
                                 continue;
                             }
 
-                            int imageId = cursor.getInt(imageIdColumn);
                             int bucketId = cursor.getInt(bucketIdColumn);
                             String bucketName = cursor.getString(bucketNameColumn);
                             long dateTaken = cursor.getLong(dateColumn);
@@ -6763,6 +7248,7 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                 ) {
                     cursor = MediaStore.Images.Media.query(ApplicationLoader.applicationContext.getContentResolver(), MediaStore.Video.Media.EXTERNAL_CONTENT_URI, projectionVideo, null, null, (Build.VERSION.SDK_INT > 28 ? MediaStore.Video.Media.DATE_MODIFIED : MediaStore.Video.Media.DATE_TAKEN) + " DESC");
                     if (cursor != null) {
+                        rowCount += cursor.getCount();
                         int imageIdColumn = cursor.getColumnIndex(MediaStore.Video.Media._ID);
                         int bucketIdColumn = cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_ID);
                         int bucketNameColumn = cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_DISPLAY_NAME);
@@ -6775,12 +7261,13 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                         int orientationColumn = cursor.getColumnIndex(MediaStore.Video.Media.ORIENTATION);
 
                         while (cursor.moveToNext()) {
+                            int imageId = cursor.getInt(imageIdColumn);
+                            maxVideoId = Math.max(maxVideoId, imageId);
                             String path = cursor.getString(dataColumn);
                             if (TextUtils.isEmpty(path)) {
                                 continue;
                             }
 
-                            int imageId = cursor.getInt(imageIdColumn);
                             int bucketId = cursor.getInt(bucketIdColumn);
                             String bucketName = cursor.getString(bucketNameColumn);
                             long dateTaken = cursor.getLong(dateColumn);
@@ -6848,20 +7335,26 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                     return 0;
                 });
             }
-            broadcastNewPhotos(guid, mediaAlbumsSorted, photoAlbumsSorted, mediaCameraAlbumId, allMediaAlbum, allPhotosAlbum, allVideosAlbum, 0);
+            broadcastNewPhotos(guid, mediaAlbumsSorted, photoAlbumsSorted, mediaCameraAlbumId, allMediaAlbum, allPhotosAlbum, allVideosAlbum, 0,
+                new GalleryScanState(generations, maxImageId, maxVideoId, hadPermission ? rowCount : -1, mediaCameraAlbumId, photoCameraAlbumId));
         });
         thread.setPriority(Thread.MIN_PRIORITY);
         thread.start();
     }
 
     public static boolean forceBroadcastNewPhotos;
-    private static void broadcastNewPhotos(final int guid, final ArrayList<AlbumEntry> mediaAlbumsSorted, final ArrayList<AlbumEntry> photoAlbumsSorted, final Integer cameraAlbumIdFinal, final AlbumEntry allMediaAlbumFinal, final AlbumEntry allPhotosAlbumFinal, final AlbumEntry allVideosAlbumFinal, int delay) {
+    /** Any thread; the runnable bookkeeping happens on the UI thread so two scans cannot cancel each other's result. */
+    private static void broadcastNewPhotos(final int guid, final ArrayList<AlbumEntry> mediaAlbumsSorted, final ArrayList<AlbumEntry> photoAlbumsSorted, final Integer cameraAlbumIdFinal, final AlbumEntry allMediaAlbumFinal, final AlbumEntry allPhotosAlbumFinal, final AlbumEntry allVideosAlbumFinal, int delay, final GalleryScanState state) {
+        AndroidUtilities.runOnUIThread(() -> scheduleBroadcastNewPhotos(guid, mediaAlbumsSorted, photoAlbumsSorted, cameraAlbumIdFinal, allMediaAlbumFinal, allPhotosAlbumFinal, allVideosAlbumFinal, delay, state));
+    }
+
+    private static void scheduleBroadcastNewPhotos(final int guid, final ArrayList<AlbumEntry> mediaAlbumsSorted, final ArrayList<AlbumEntry> photoAlbumsSorted, final Integer cameraAlbumIdFinal, final AlbumEntry allMediaAlbumFinal, final AlbumEntry allPhotosAlbumFinal, final AlbumEntry allVideosAlbumFinal, int delay, final GalleryScanState state) {
         if (broadcastPhotosRunnable != null) {
             AndroidUtilities.cancelRunOnUIThread(broadcastPhotosRunnable);
         }
         AndroidUtilities.runOnUIThread(broadcastPhotosRunnable = () -> {
             if (PhotoViewer.getInstance().isVisible() && !forceBroadcastNewPhotos) {
-                broadcastNewPhotos(guid, mediaAlbumsSorted, photoAlbumsSorted, cameraAlbumIdFinal, allMediaAlbumFinal, allPhotosAlbumFinal, allVideosAlbumFinal, 1000);
+                scheduleBroadcastNewPhotos(guid, mediaAlbumsSorted, photoAlbumsSorted, cameraAlbumIdFinal, allMediaAlbumFinal, allPhotosAlbumFinal, allVideosAlbumFinal, 1000, state);
                 return;
             }
             allMediaAlbums = mediaAlbumsSorted;
@@ -6870,7 +7363,19 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             allPhotosAlbumEntry = allPhotosAlbumFinal;
             allMediaAlbumEntry = allMediaAlbumFinal;
             allVideosAlbumEntry = allVideosAlbumFinal;
+            if (state != null) {
+                galleryGenerations = state.generations;
+                galleryMaxImageId = state.maxImageId;
+                galleryMaxVideoId = state.maxVideoId;
+                galleryRowCount = state.rowCount;
+                galleryMediaCameraAlbumId = state.mediaCameraAlbumId;
+                galleryPhotoCameraAlbumId = state.photoCameraAlbumId;
+                galleryFullScanRunning = false;
+            }
             NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.albumsDidLoad, guid, mediaAlbumsSorted, photoAlbumsSorted, cameraAlbumIdFinal);
+            if (state != null) {
+                drainQueuedGalleryRefresh();
+            }
         }, delay);
     }
 

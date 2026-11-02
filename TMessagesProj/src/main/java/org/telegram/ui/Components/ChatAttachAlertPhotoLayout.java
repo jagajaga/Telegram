@@ -2551,15 +2551,9 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
     }
 
     public void loadGalleryPhotos() {
-        MediaController.AlbumEntry albumEntry;
-        if (shouldLoadAllMedia()) {
-            albumEntry = MediaController.allMediaAlbumEntry;
-        } else {
-            albumEntry = MediaController.allPhotosAlbumEntry;
-        }
-        if (albumEntry == null) {
-            MediaController.loadGalleryPhotosAlbums(0);
-        }
+        // Always ask for a refresh: with a snapshot in place this is a delta query that lands in a
+        // few milliseconds, so a photo taken just before the sheet opened is in the grid.
+        MediaController.refreshGallery();
     }
 
     public void setIncludeVideosInGallery(boolean includeVideosInGallery) {

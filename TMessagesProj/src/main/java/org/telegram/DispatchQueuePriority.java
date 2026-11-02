@@ -10,38 +10,42 @@ import java.util.concurrent.TimeUnit;
 
 public class DispatchQueuePriority {
 
-    ThreadPoolExecutor threadPoolExecutor = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS, new PriorityBlockingQueue<>(10, new Comparator<Runnable>() {
-
-        @Override
-        public int compare(Runnable o1, Runnable o2) {
-            int priority1 = 1;
-            int priority2 = 1;
-            if (o1 instanceof PriorityRunnable) {
-                priority1 = ((PriorityRunnable) o1).priority;
-            }
-            if (o2 instanceof PriorityRunnable) {
-                priority2 = ((PriorityRunnable) o2).priority;
-            }
-            return priority2 - priority1;
-        }
-    })) {
-        @Override
-        protected void beforeExecute(Thread t, Runnable r) {
-            CountDownLatch latch = pauseLatch;
-            if (latch != null) {
-                try {
-                    latch.await();
-                } catch (InterruptedException e) {
-                    FileLog.e(e);
-                }
-            }
-        }
-    };
+    private final ThreadPoolExecutor threadPoolExecutor;
 
     private volatile CountDownLatch pauseLatch;
 
     public DispatchQueuePriority(String threadName) {
+        this(threadName, 1);
+    }
 
+    public DispatchQueuePriority(String threadName, int threads) {
+        threadPoolExecutor = new ThreadPoolExecutor(threads, threads, 60, TimeUnit.SECONDS, new PriorityBlockingQueue<>(10, new Comparator<Runnable>() {
+
+            @Override
+            public int compare(Runnable o1, Runnable o2) {
+                int priority1 = 1;
+                int priority2 = 1;
+                if (o1 instanceof PriorityRunnable) {
+                    priority1 = ((PriorityRunnable) o1).priority;
+                }
+                if (o2 instanceof PriorityRunnable) {
+                    priority2 = ((PriorityRunnable) o2).priority;
+                }
+                return priority2 - priority1;
+            }
+        })) {
+            @Override
+            protected void beforeExecute(Thread t, Runnable r) {
+                CountDownLatch latch = pauseLatch;
+                if (latch != null) {
+                    try {
+                        latch.await();
+                    } catch (InterruptedException e) {
+                        FileLog.e(e);
+                    }
+                }
+            }
+        };
     }
 
     public static Runnable wrap(Runnable runnable, int priority) {

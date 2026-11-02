@@ -26,6 +26,8 @@ import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaMetadataRetriever;
+import android.content.ContentUris;
+import android.graphics.Point;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Build;
@@ -34,6 +36,7 @@ import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.text.TextUtils;
 import android.util.Pair;
+import android.util.Size;
 import android.util.SparseArray;
 
 import androidx.annotation.Nullable;
@@ -127,6 +130,7 @@ public class ImageLoader {
     private LinkedList<HttpImageTask> httpTasks = new LinkedList<>();
     private LinkedList<ArtworkLoadTask> artworkTasks = new LinkedList<>();
     private DispatchQueuePriority cacheOutQueue = new DispatchQueuePriority("cacheOutQueue");
+    private DispatchQueuePriority galleryThumbOutQueue = new DispatchQueuePriority("galleryThumbOutQueue", galleryThumbThreads());
     private DispatchQueue cacheThumbOutQueue = new DispatchQueue("cacheThumbOutQueue");
     private DispatchQueue thumbGeneratingQueue = new DispatchQueue("thumbGeneratingQueue");
     private DispatchQueue imageLoadQueue = new DispatchQueue("imageLoadQueue");
@@ -851,6 +855,80 @@ public class ImageLoader {
         }
     }
 
+    /**
+     * Local gallery thumbnails ("thumb://", "vthumb://") are decoded on their own small pool:
+     * the attach sheet asks for a whole grid of them at once, and a single decode thread shared with chat
+     * media made every cell wait for the one before it.
+     */
+    private static int galleryThumbThreads() {
+        return Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors() / 2));
+    }
+
+    private static final String GALLERY_THUMB_PREFIX = "thumb://";
+    private static final String GALLERY_VIDEO_THUMB_PREFIX = "vthumb://";
+
+    private static boolean isGalleryThumbLocation(ImageLocation location) {
+        if (location == null || location.path == null) {
+            return false;
+        }
+        String path = location.path;
+        return path.startsWith(GALLERY_THUMB_PREFIX) || path.startsWith(GALLERY_VIDEO_THUMB_PREFIX);
+    }
+
+    private DispatchQueuePriority cacheOutQueueFor(CacheImage cacheImage) {
+        return cacheImage != null && isGalleryThumbLocation(cacheImage.imageLocation) ? galleryThumbOutQueue : cacheOutQueue;
+    }
+
+    private static int galleryThumbSize() {
+        Point size = AndroidUtilities.getRealScreenSize();
+        int min = Math.min(size.x, size.y);
+        return Math.max(AndroidUtilities.dp(100), Math.min(512, min / 3));
+    }
+
+    /**
+     * A "thumb://" gallery photo from MediaProvider's thumbnail cache (Android 10+) instead of a decode
+     * of the original file. The provider hands it out already rotated by its EXIF orientation, while
+     * every "thumb://" consumer rotates by PhotoEntry.orientation itself, so the rotation is undone
+     * here and the bitmap is interchangeable with one decoded from the file. Returns null when the
+     * provider cannot serve it or the photo is mirrored (left to the file decode), so the caller
+     * falls through to the old path.
+     */
+    @RequiresApi(api = Build.VERSION_CODES.Q)
+    private static Bitmap loadSystemThumbnail(long mediaId, String path) {
+        Bitmap bitmap;
+        try {
+            Uri uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, mediaId);
+            int size = galleryThumbSize();
+            bitmap = ApplicationLoader.applicationContext.getContentResolver().loadThumbnail(uri, new Size(size, size), null);
+        } catch (Throwable e) {
+            return null;
+        }
+        if (bitmap == null) {
+            return null;
+        }
+        Pair<Integer, Integer> orientation = AndroidUtilities.getImageOrientation(path);
+        if (orientation.second != 0) {
+            bitmap.recycle();
+            return null;
+        }
+        if (orientation.first != 0) {
+            try {
+                Matrix matrix = new Matrix();
+                matrix.postRotate(-orientation.first);
+                Bitmap rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+                if (rotated != bitmap) {
+                    bitmap.recycle();
+                }
+                bitmap = rotated;
+            } catch (Throwable e) {
+                FileLog.e(e);
+                bitmap.recycle();
+                return null;
+            }
+        }
+        return bitmap;
+    }
+
     private class CacheOutTask implements Runnable {
         private Thread runningThread;
         private final Object sync = new Object();
@@ -1298,6 +1376,11 @@ public class ImageLoader {
                             }
                         }
                     } else if (mediaThumbPath != null) {
+                        if (mediaId != null && mediaId > 0 && !mediaIsVideo && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            image = loadSystemThumbnail(mediaId, mediaThumbPath);
+                        }
+                    }
+                    if (mediaThumbPath != null && image == null) {
                         opts.inJustDecodeBounds = true;
                         opts.inPreferredConfig = force8888 ? Bitmap.Config.ARGB_8888 : Bitmap.Config.RGB_565;
                         FileInputStream is = new FileInputStream(cacheFileFinal);
@@ -1950,8 +2033,9 @@ public class ImageLoader {
                     if (currentMediaType == ImageReceiver.TYPE_THUMB) {
                         cacheThumbOutQueue.cancelRunnable(cacheTask);
                     } else {
-                        cacheOutQueue.cancelRunnable(cacheTask);
-                        cacheOutQueue.cancelRunnable(runningTask);
+                        DispatchQueuePriority queue = cacheOutQueueFor(this);
+                        queue.cancelRunnable(cacheTask);
+                        queue.cancelRunnable(runningTask);
                     }
                     cacheTask.cancel();
                     cacheTask = null;
@@ -2297,7 +2381,7 @@ public class ImageLoader {
                                 if (task.cacheImage.type == ImageReceiver.TYPE_THUMB) {
                                     cacheThumbOutQueue.postRunnable(task);
                                 } else {
-                                    cacheOutQueue.postRunnable(task, task.cacheImage.priority);
+                                    cacheOutQueueFor(task.cacheImage).postRunnable(task, task.cacheImage.priority);
                                 }
                             }
                         });
@@ -3260,7 +3344,7 @@ public class ImageLoader {
                         if (thumb != 0) {
                             cacheThumbOutQueue.postRunnable(img.cacheTask);
                         } else {
-                            img.runningTask = cacheOutQueue.postRunnable(img.cacheTask, img.priority);
+                            img.runningTask = cacheOutQueueFor(img).postRunnable(img.cacheTask, img.priority);
                         }
                     } else {
                         img.url = url;
@@ -3774,7 +3858,7 @@ public class ImageLoader {
                 if (task.cacheImage.type == ImageReceiver.TYPE_THUMB) {
                     cacheThumbOutQueue.postRunnable(task);
                 } else {
-                    cacheOutQueue.postRunnable(task, task.cacheImage.priority);
+                    cacheOutQueueFor(task.cacheImage).postRunnable(task, task.cacheImage.priority);
                 }
             }
         });

@@ -142,6 +142,11 @@ android {
 
         multiDexEnabled true
 
+        // -PabiFilters=arm64-v8a builds the native code for a subset of ABIs (CI, local sideload builds)
+        if (project.hasProperty("abiFilters")) {
+            ndk { abiFilters.addAll(project.property("abiFilters").split(",").collect { it.trim() }) }
+        }
+
         externalNativeBuild {
             cmake {
                 version '3.22.1'

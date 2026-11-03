@@ -49,6 +49,7 @@ public class PushListenerController {
     public static void sendRegistrationToServer(@PushType int pushType, String token) {
         Utilities.stageQueue.postRunnable(() -> {
             ConnectionsManager.setRegId(token, pushType, SharedConfig.pushStringStatus);
+            BatteryDiary.log(token == null ? "push token missing (" + SharedConfig.pushStringStatus + ")" : "push token registered, " + (pushType == PUSH_TYPE_FIREBASE ? "firebase" : "huawei") + ", " + token.length() + " chars");
             if (token == null) {
                 return;
             }

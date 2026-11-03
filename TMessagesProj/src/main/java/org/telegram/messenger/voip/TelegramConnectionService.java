@@ -8,6 +8,7 @@ import android.telecom.ConnectionRequest;
 import android.telecom.ConnectionService;
 import android.telecom.PhoneAccountHandle;
 
+import org.telegram.messenger.BatteryDiary;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.FileLog;
 
@@ -39,6 +40,7 @@ public class TelegramConnectionService extends ConnectionService {
 		if (BuildVars.LOGS_ENABLED) {
 			FileLog.d("onCreateIncomingConnection "/*+request*/);
 		}
+		BatteryDiary.log("call: system asked for the incoming connection");
 		Bundle extras = request.getExtras();
 		if (extras.getInt("call_type") == 1) { // private
 			VoIPService svc = VoIPService.getSharedInstance();
@@ -63,6 +65,7 @@ public class TelegramConnectionService extends ConnectionService {
 		if (BuildVars.LOGS_ENABLED) {
 			FileLog.e("onCreateIncomingConnectionFailed "/*+request*/);
 		}
+		BatteryDiary.log("call: system refused the incoming connection");
 		if (VoIPService.getSharedInstance() != null) {
 			VoIPService.getSharedInstance().callFailedFromConnectionService();
 		}
@@ -73,6 +76,7 @@ public class TelegramConnectionService extends ConnectionService {
 		if (BuildVars.LOGS_ENABLED) {
 			FileLog.e("onCreateOutgoingConnectionFailed "/*+request*/);
 		}
+		BatteryDiary.log("call: system refused the outgoing connection");
 		if (VoIPService.getSharedInstance() != null) {
 			VoIPService.getSharedInstance().callFailedFromConnectionService();
 		}
@@ -82,6 +86,7 @@ public class TelegramConnectionService extends ConnectionService {
 	public Connection onCreateOutgoingConnection(PhoneAccountHandle connectionManagerPhoneAccount, ConnectionRequest request) {
 		if (BuildVars.LOGS_ENABLED)
 			FileLog.d("onCreateOutgoingConnection "/*+request*/);
+		BatteryDiary.log("call: system asked for the outgoing connection");
 		Bundle extras = request.getExtras();
 		if (extras.getInt("call_type") == 1) { // private
 			VoIPService svc = VoIPService.getSharedInstance();

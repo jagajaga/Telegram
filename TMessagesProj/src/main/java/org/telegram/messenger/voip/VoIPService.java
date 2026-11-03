@@ -96,6 +96,7 @@ import org.json.JSONObject;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.BatteryDiary;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.ContactsController;
@@ -899,6 +900,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 		} else if (isOutgoing) {
 			if (user != null) {
 				dispatchStateChanged(STATE_REQUESTING);
+				BatteryDiary.log("call: outgoing, system call integration " + (USE_CONNECTION_SERVICE ? "on" : "off"));
 				if (USE_CONNECTION_SERVICE) {
 					TelecomManager tm = (TelecomManager) getSystemService(TELECOM_SERVICE);
 					Bundle extras = new Bundle();
@@ -1217,6 +1219,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 				}
 				stopSelf();
 			} else {
+				BatteryDiary.log("call: incoming, system call integration " + (USE_CONNECTION_SERVICE ? "on" : "off"));
 				if (USE_CONNECTION_SERVICE) {
 					ContactsController.getInstance(currentAccount).createOrUpdateConnectionServiceContact(user.id, user.first_name, user.last_name);
 					TelecomManager tm = (TelecomManager) getSystemService(TELECOM_SERVICE);
@@ -5569,6 +5572,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 		if (USE_CONNECTION_SERVICE) {
 			Runnable r = () -> {
 				if (systemCallConnection != null) {
+					BatteryDiary.log("call: ending system connection, discard reason " + callDiscardReason + ", state " + systemCallConnection.getState());
 					switch (callDiscardReason) {
 						case DISCARD_REASON_HANGUP:
 							systemCallConnection.setDisconnected(new DisconnectCause(isOutgoing ? DisconnectCause.LOCAL : DisconnectCause.REJECTED));
@@ -5588,6 +5592,8 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 					}
 					systemCallConnection.destroy();
 					systemCallConnection = null;
+				} else {
+					BatteryDiary.log("call: ended, but the system never created a connection for it");
 				}
 			};
 			if (delay > 0) {

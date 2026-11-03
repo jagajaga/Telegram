@@ -62,6 +62,7 @@ public class UserConfig extends BaseController {
     public boolean syncContacts = true;
     public boolean suggestContacts = true;
     public boolean showCallsTab;
+    public boolean callsTabReplacesContacts;
     public boolean hasSecureData;
     public int loginTime;
     public TLRPC.TL_help_termsOfService unacceptedTermsOfService;
@@ -161,6 +162,7 @@ public class UserConfig extends BaseController {
                     editor.putInt("loginTime", loginTime);
                     editor.putBoolean("syncContacts", syncContacts);
                     editor.putBoolean("showCallsTab", showCallsTab);
+                    editor.putBoolean("callsTabReplacesContacts", callsTabReplacesContacts);
                     editor.putBoolean("suggestContacts", suggestContacts);
                     editor.putBoolean("hasSecureData", hasSecureData);
                     editor.putBoolean("notificationsSettingsLoaded4", notificationsSettingsLoaded);
@@ -313,6 +315,7 @@ public class UserConfig extends BaseController {
             loginTime = preferences.getInt("loginTime", currentAccount);
             syncContacts = preferences.getBoolean("syncContacts", true);
             showCallsTab = preferences.getBoolean("showCallsTab", false);
+            callsTabReplacesContacts = preferences.getBoolean("callsTabReplacesContacts", true);
             suggestContacts = preferences.getBoolean("suggestContacts", true);
             hasSecureData = preferences.getBoolean("hasSecureData", false);
             notificationsSettingsLoaded = preferences.getBoolean("notificationsSettingsLoaded4", false);
@@ -485,6 +488,7 @@ public class UserConfig extends BaseController {
         contactsReimported = true;
         syncContacts = true;
         showCallsTab = false;
+        callsTabReplacesContacts = true;
         suggestContacts = true;
         unreadDialogsLoaded = true;
         hasValidDialogLoadIds = true;
@@ -567,6 +571,14 @@ public class UserConfig extends BaseController {
     public void setShowCallsTab(boolean show) {
         if (showCallsTab != show) {
             showCallsTab = show;
+            saveConfig(false);
+        }
+    }
+
+    /** The Calls tab takes the Contacts tab's place in the main tabs (fork). */
+    public void setCallsTabReplacesContacts(boolean replace) {
+        if (callsTabReplacesContacts != replace) {
+            callsTabReplacesContacts = replace;
             saveConfig(false);
         }
     }

@@ -102,8 +102,32 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     private static final int INDEX_CALLS = 3;
     private static final int INDEX_PROFILE = 4;
 
-    private static int indexToPosition(int index) {
+    private int indexToPosition(int index) {
+        if (index == INDEX_CALLS && getUserConfig().callsTabReplacesContacts) {
+            return POSITION_CONTACTS;
+        }
         return index > 2 ? index - 1 : index;
+    }
+
+    /** Child order of the tab bar: the Calls tab sits where Contacts was when it replaces it, after Settings otherwise. */
+    private int[] tabOrder() {
+        return getUserConfig().callsTabReplacesContacts
+            ? new int[]{INDEX_CHATS, INDEX_CALLS, INDEX_CONTACTS, INDEX_SETTINGS, INDEX_PROFILE}
+            : new int[]{INDEX_CHATS, INDEX_CONTACTS, INDEX_SETTINGS, INDEX_CALLS, INDEX_PROFILE};
+    }
+
+    private void applyTabOrder() {
+        if (tabsView == null || tabs == null) {
+            return;
+        }
+        final int[] order = tabOrder();
+        for (int i = 0; i < order.length; i++) {
+            final GlassTabView view = tabs[order[i]];
+            if (tabsView.indexOfChild(view) != i) {
+                tabsView.removeView(view);
+                tabsView.addView(view, i);
+            }
+        }
     }
 
     private static final int ANIMATOR_ID_TABS_VISIBLE = 0;
@@ -281,6 +305,10 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
     private void checkContactsTabBadge() {
         if (tabsView != null && tabs[INDEX_CONTACTS] != null) {
+            if (getUserConfig().callsTabReplacesContacts) {
+                tabs[INDEX_CONTACTS].setCounter(null, true, false);
+                return;
+            }
             final boolean hasPermission = Build.VERSION.SDK_INT >= 23 && ContactsController.hasContactsPermission();
             if (hasPermission) {
                 MessagesController.getGlobalNotificationsSettings().edit().putBoolean("askAboutContacts2", true).apply();
@@ -327,14 +355,16 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         tabsView.addTabToIgnoreClick(tabs[INDEX_PROFILE]);
         tabsView.addTabToIgnoreClick(tabs[INDEX_CALLS]);
 
-        for (int index = 0; index < tabs.length; index++) {
+        final int[] order = tabOrder();
+        for (int i = 0; i < order.length; i++) {
+            final int index = order[i];
             final GlassTabView view = tabs[index];
 
-            final int position = indexToPosition(index);
             tabs[index].setOnClickListener(v -> {
                 if (viewPager.isManualScrolling() || viewPager.isTouch()) {
                     return;
                 }
+                final int position = indexToPosition(index);
 
                 if (viewPager.getCurrentPosition() == position) {
                     final BaseFragment fragment = getCurrentVisibleFragment();
@@ -422,6 +452,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             args.putBoolean("needFinishFragment", false);
             presentFragment(new CallLogActivity(args));
         });
+        o.add(R.drawable.menu_add_tab_24, getString(R.string.MainTabsCallsInsteadOfContacts), () -> setCallsTabReplacesContacts(true));
         o.setBlur(true);
         o.translate(0, -dp(4));
         o.setGravity(Gravity.LEFT);
@@ -436,7 +467,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         if (getContext() == null || getParentActivity() == null) return false;
         final ItemOptions o = ItemOptions.makeOptions(this, anchor);
         o.add(R.drawable.menu_call_create, getString(R.string.GroupCallCreate2), () -> CallLogActivity.openCreateCall(this));
-        if (getUserConfig().showCallsTab) {
+        if (getUserConfig().callsTabReplacesContacts) {
+            o.add(R.drawable.msg_archive_hide, getString(R.string.MainTabsShowContacts), () -> setCallsTabReplacesContacts(false));
+        } else if (getUserConfig().showCallsTab) {
             o.add(R.drawable.msg_archive_hide, getString(R.string.HideCallTab), () -> {
                 getUserConfig().setShowCallsTab(false);
                 checkUi_callTabVisible(false, true);
@@ -733,8 +766,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
         if (viewPager != null) {
             final int currentPosition = viewPager.getCurrentPosition();
-            if (currentPosition != POSITION_CALLS_OR_SETTINGS && dropCallsFragmentAfterPageScroll) {
+            if (currentPosition != POSITION_CALLS_OR_SETTINGS && currentPosition != POSITION_CONTACTS && dropCallsFragmentAfterPageScroll) {
                 dropFragmentAtPosition(POSITION_CALLS_OR_SETTINGS);
+                dropFragmentAtPosition(POSITION_CONTACTS);
                 dropCallsFragmentAfterPageScroll = false;
             }
             if (currentPosition != POSITION_PROFILE) {
@@ -808,13 +842,19 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     @Override
     protected BaseFragment createBaseFragmentAt(int position) {
         if (position == POSITION_CONTACTS) {
+            if (getUserConfig().callsTabReplacesContacts) {
+                Bundle args = new Bundle();
+                args.putBoolean("needFinishFragment", false);
+                args.putBoolean("hasMainTabs", true);
+                return new CallLogActivity(args);
+            }
             Bundle args = new Bundle();
             args.putBoolean("needPhonebook", true);
             args.putBoolean("needFinishFragment", false);
             args.putBoolean("hasMainTabs", true);
             return new ContactsActivity(args);
         } else if (position == POSITION_CALLS_OR_SETTINGS) {
-            if (getUserConfig().showCallsTab) {
+            if (getUserConfig().showCallsTab && !getUserConfig().callsTabReplacesContacts) {
                 Bundle args = new Bundle();
                 args.putBoolean("needFinishFragment", false);
                 args.putBoolean("hasMainTabs", true);
@@ -992,14 +1032,21 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         } else if (id == NotificationCenter.needSetDayNightTheme) {
             clearAllHiddenFragments();
         } else if (id == NotificationCenter.callTabsVisibleToggled) {
-            final boolean callTabsVisible = getUserConfig().showCallsTab;
-            checkUi_callTabVisible(callTabsVisible, true);
-            if (viewPager != null && viewPager.getCurrentPosition() == POSITION_CALLS_OR_SETTINGS) {
+            if (getUserConfig().showCallsTab && getUserConfig().callsTabReplacesContacts) {
+                // "Show Calls Tab" was chosen elsewhere (call log menu): the tab goes back next to Settings
+                getUserConfig().setCallsTabReplacesContacts(false);
+            }
+            applyTabOrder();
+            checkUi_tabsVisible(true);
+            checkContactsTabBadge();
+            final int current = viewPager != null ? viewPager.getCurrentPosition() : POSITION_CHATS;
+            if (current == POSITION_CALLS_OR_SETTINGS || current == POSITION_CONTACTS) {
                 viewPager.scrollToPosition(POSITION_CHATS);
                 selectTab(POSITION_CHATS, true);
                 dropCallsFragmentAfterPageScroll = true;
             } else {
                 dropFragmentAtPosition(POSITION_CALLS_OR_SETTINGS);
+                dropFragmentAtPosition(POSITION_CONTACTS);
             }
         } else if (id == NotificationCenter.mainUserInfoChanged) {
             if (tabs != null && tabs[INDEX_PROFILE] != null) {
@@ -1087,10 +1134,26 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     }
 
     private void checkUi_callTabVisible(boolean callTabsVisible, boolean animated) {
-        if (tabsView != null) {
-            tabsView.setViewVisible(tabs[INDEX_SETTINGS], !callTabsVisible, animated);
-            tabsView.setViewVisible(tabs[INDEX_CALLS], callTabsVisible, animated);
+        checkUi_tabsVisible(animated);
+    }
+
+    private void checkUi_tabsVisible(boolean animated) {
+        if (tabsView == null) {
+            return;
         }
+        final boolean replace = getUserConfig().callsTabReplacesContacts;
+        final boolean callsNextToSettings = getUserConfig().showCallsTab && !replace;
+        tabsView.setViewVisible(tabs[INDEX_CONTACTS], !replace, animated);
+        tabsView.setViewVisible(tabs[INDEX_SETTINGS], !callsNextToSettings, animated);
+        tabsView.setViewVisible(tabs[INDEX_CALLS], callsNextToSettings || replace, animated);
+    }
+
+    private void setCallsTabReplacesContacts(boolean replace) {
+        getUserConfig().setCallsTabReplacesContacts(replace);
+        if (replace) {
+            getUserConfig().setShowCallsTab(false);
+        }
+        NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.callTabsVisibleToggled);
     }
 
     @Override

@@ -10616,6 +10616,8 @@
 
     <string name="MainTabsContacts">Contacts</string>
     <string name="MainTabsCalls">Calls</string>
+    <string name="MainTabsCallsInsteadOfContacts">Show Calls Instead</string>
+    <string name="MainTabsShowContacts">Show Contacts Tab</string>
     <string name="MainTabsChats">Chats</string>
     <string name="MainTabsProfile">Profile</string>
     <string name="MainTabsSettings">Settings</string>

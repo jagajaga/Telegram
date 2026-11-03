@@ -210,7 +210,11 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 	public static final int AUDIO_ROUTE_SPEAKER = 1;
 	public static final int AUDIO_ROUTE_BLUETOOTH = 2;
 
-	public static final boolean USE_CONNECTION_SERVICE = isDeviceCompatibleWithConnectionServiceAPI();
+	// Not final: when the system refuses to take part in a call, the fork drops back to Telegram's own
+	// call handling for the rest of the process (see fallBackFromConnectionService).
+	public static boolean USE_CONNECTION_SERVICE = isDeviceCompatibleWithConnectionServiceAPI();
+	private static final long CONNECTION_SERVICE_INCOMING_UI_TIMEOUT = 3000;
+	private Runnable connectionServiceIncomingUiWatchdog;
 
 	private int currentAccount = -1;
 	private static final int PROXIMITY_SCREEN_OFF_WAKE_LOCK = 32;
@@ -1226,6 +1230,12 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 					Bundle extras = new Bundle();
 					extras.putInt("call_type", 1);
 					tm.addNewIncomingCall(addAccountToTelecomManager(), extras);
+					AndroidUtilities.runOnUIThread(connectionServiceIncomingUiWatchdog = () -> {
+						connectionServiceIncomingUiWatchdog = null;
+						if (currentState != STATE_WAITING_INCOMING) {
+							fallBackFromConnectionService("the system did not show the incoming call within " + CONNECTION_SERVICE_INCOMING_UI_TIMEOUT + " ms");
+						}
+					}, CONNECTION_SERVICE_INCOMING_UI_TIMEOUT);
 				}
 				if (startRinging) {
 					startRinging();
@@ -5431,10 +5441,44 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 	}
 
 	void callFailedFromConnectionService() {
+		fallBackFromConnectionService("the system refused the " + (isOutgoing ? "outgoing" : "incoming") + " connection");
+	}
+
+	/**
+	 * The system call integration did not work for this call: carry on the way Telegram handles calls
+	 * on its own (ring, or place the call), and switch the integration off so the next call does not
+	 * depend on it either. Upstream hangs up here, which is a silently missed call.
+	 */
+	private void fallBackFromConnectionService(String reason) {
+		if (!USE_CONNECTION_SERVICE) {
+			return;
+		}
+		BatteryDiary.log("call: system call integration failed (" + reason + "); continuing without it and switching it off");
+		USE_CONNECTION_SERVICE = false;
+		MessagesController.getGlobalMainSettings().edit().putBoolean("system_call_integration", false).apply();
+		if (connectionServiceIncomingUiWatchdog != null) {
+			AndroidUtilities.cancelRunOnUIThread(connectionServiceIncomingUiWatchdog);
+			connectionServiceIncomingUiWatchdog = null;
+		}
+		if (systemCallConnection != null) {
+			try {
+				systemCallConnection.setDisconnected(new DisconnectCause(DisconnectCause.ERROR));
+				systemCallConnection.destroy();
+			} catch (Throwable e) {
+				FileLog.e(e);
+			}
+			systemCallConnection = null;
+		}
 		if (isOutgoing) {
-			callFailed(Instance.ERROR_CONNECTION_SERVICE);
-		} else {
-			hangUp();
+			if (delayedStartOutgoingCall != null) {
+				AndroidUtilities.cancelRunOnUIThread(delayedStartOutgoingCall);
+				delayedStartOutgoingCall = null;
+			}
+			if (currentState == STATE_REQUESTING) {
+				startOutgoingCall();
+			}
+		} else if (currentState != STATE_WAITING_INCOMING) {
+			startRinging();
 		}
 	}
 
@@ -5808,6 +5852,11 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 
 		@Override
 		public void onShowIncomingCallUi() {
+			if (connectionServiceIncomingUiWatchdog != null) {
+				AndroidUtilities.cancelRunOnUIThread(connectionServiceIncomingUiWatchdog);
+				connectionServiceIncomingUiWatchdog = null;
+			}
+			BatteryDiary.log("call: system showed the incoming call");
 			startRinging();
 		}
 

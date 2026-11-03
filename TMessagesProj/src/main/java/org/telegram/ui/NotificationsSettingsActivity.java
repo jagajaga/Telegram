@@ -41,6 +41,7 @@ import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessagesController;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.NotificationsController;
@@ -132,6 +133,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
     private int callsSectionRow;
     private int callsVibrateRow;
     private int callsRingtoneRow;
+    private int callsSystemIntegrationRow;
     private int eventsSection2Row;
     private int eventsSectionRow;
     @Keep
@@ -187,6 +189,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
         callsSectionRow = rowCount++;
         callsVibrateRow = rowCount++;
         callsRingtoneRow = rowCount++;
+        callsSystemIntegrationRow = rowCount++;
         eventsSection2Row = rowCount++;
 
         badgeNumberSection = rowCount++;
@@ -725,6 +728,11 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                 editor.putBoolean("badgeNumberMessages", getNotificationsController().showBadgeMessages);
                 editor.commit();
                 getNotificationsController().updateBadge();
+            } else if (position == callsSystemIntegrationRow) {
+                SharedPreferences preferences = MessagesController.getGlobalMainSettings();
+                enabled = preferences.getBoolean("system_call_integration", false);
+                preferences.edit().putBoolean("system_call_integration", !enabled).commit();
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, getString(R.string.CallsSystemIntegrationRestart)).show();
             } else if (position == notificationsServiceConnectionRow) {
                 SharedPreferences preferences = MessagesController.getNotificationsSettings(currentAccount);
                 enabled = preferences.getBoolean("pushConnection", getMessagesController().backgroundConnection);
@@ -1019,6 +1027,8 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                         checkCell.setTextAndCheck("Android Auto", preferences.getBoolean("EnableAutoNotifications", false), true);
                     } else if (position == notificationsServiceRow) {
                         checkCell.setTextAndValueAndCheck(getString("NotificationsService", R.string.NotificationsService), getString("NotificationsServiceInfo", R.string.NotificationsServiceInfo), preferences.getBoolean("pushService", getMessagesController().keepAliveService), true, true);
+                    } else if (position == callsSystemIntegrationRow) {
+                        checkCell.setTextAndValueAndCheck(getString(R.string.CallsSystemIntegration), getString(R.string.CallsSystemIntegrationInfo), MessagesController.getGlobalMainSettings().getBoolean("system_call_integration", false), true, false);
                     } else if (position == notificationsServiceConnectionRow) {
                         checkCell.setTextAndValueAndCheck(getString("NotificationsServiceConnection", R.string.NotificationsServiceConnection), getString("NotificationsServiceConnectionInfo", R.string.NotificationsServiceConnectionInfo), preferences.getBoolean("pushConnection", getMessagesController().backgroundConnection), true, true);
                     } else if (position == badgeNumberShowRow) {
@@ -1152,7 +1162,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                         if (value.equals("NoSound")) {
                             value = getString("NoSound", R.string.NoSound);
                         }
-                        textCell.setTextAndValue(getString("VoipSettingsRingtone", R.string.VoipSettingsRingtone), value, updateRingtone, false);
+                        textCell.setTextAndValue(getString("VoipSettingsRingtone", R.string.VoipSettingsRingtone), value, updateRingtone, true);
                         updateRingtone = false;
                     } else if (position == callsVibrateRow) {
                         int value = preferences.getInt("vibrate_calls", 0);
@@ -1203,7 +1213,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                     position == inappPreviewRow || position == contactJoinedRow || position == pinnedMessageRow ||
                     position == notificationsServiceRow || position == badgeNumberMutedRow || position == badgeNumberMessagesRow ||
                     position == badgeNumberShowRow || position == inappPriorityRow || position == inchatSoundRow ||
-                    position == androidAutoAlertRow || position == accountsAllRow) {
+                    position == androidAutoAlertRow || position == accountsAllRow || position == callsSystemIntegrationRow) {
                 return 1;
             } else if (position == resetNotificationsRow) {
                 return 2;

@@ -5690,12 +5690,18 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 		TelecomManager tm = (TelecomManager) getSystemService(TELECOM_SERVICE);
 		TLRPC.User self = UserConfig.getInstance(currentAccount).getCurrentUser();
 		PhoneAccountHandle handle = new PhoneAccountHandle(new ComponentName(this, TelegramConnectionService.class), "" + self.id);
-		PhoneAccount account = new PhoneAccount.Builder(handle, ContactsController.formatName(self.first_name, self.last_name))
+		PhoneAccount.Builder builder = new PhoneAccount.Builder(handle, ContactsController.formatName(self.first_name, self.last_name))
 				.setCapabilities(PhoneAccount.CAPABILITY_SELF_MANAGED)
 				.setIcon(Icon.createWithResource(this, R.drawable.ic_launcher_dr))
 				.setHighlightColor(0xff2ca5e0)
-				.addSupportedUriScheme("sip")
-				.build();
+				.addSupportedUriScheme("sip");
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+			// show Telegram calls in the phone's call log
+			Bundle accountExtras = new Bundle();
+			accountExtras.putBoolean(PhoneAccount.EXTRA_LOG_SELF_MANAGED_CALLS, true);
+			builder.setExtras(accountExtras);
+		}
+		PhoneAccount account = builder.build();
 		tm.registerPhoneAccount(account);
 		return handle;
 	}
@@ -5704,8 +5710,13 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
 			return false;
 		}
-		// some non-Google devices don't implement the ConnectionService API correctly so, sadly,
-		// we'll have to whitelist only a handful of known-compatible devices for now
+		// Android's ConnectionService is the closest thing to CallKit: calls take part in the phone's
+		// audio routing, Bluetooth and car controls and, from Android 10, the call log. Upstream keeps
+		// it off because some OEM implementations misbehave; this fork makes it a switch
+		// (Settings → Notifications and Sounds → Calls), read once when the call service class loads.
+		if (MessagesController.getGlobalMainSettings().getBoolean("system_call_integration", false)) {
+			return true;
+		}
 		return false;/*"angler".equals(Build.PRODUCT)            // Nexus 6P
 				|| "bullhead".equals(Build.PRODUCT)        // Nexus 5X
 				|| "sailfish".equals(Build.PRODUCT)        // Pixel

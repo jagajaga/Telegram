@@ -19,6 +19,7 @@ public class NotificationRepeat extends IntentService {
 
     @Override
     protected void onHandleIntent(Intent intent) {
+        BatteryDiary.alarm("repeat notifications");
         if (intent == null) {
             return;
         }

@@ -27,6 +27,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.BatteryDiary;
 import org.telegram.messenger.BatteryPolicy;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.DownloadController;
@@ -118,6 +119,8 @@ public class DataSettingsActivity extends BaseFragment {
     private int batteryChannelsLazyRow;
     private int batteryMutedRow;
     private int batterySyncRow;
+    private int batteryDiaryRow;
+    private int batteryDiarySendRow;
     private int batteryInfoRow;
 
     private int rowCount;
@@ -180,6 +183,8 @@ public class DataSettingsActivity extends BaseFragment {
         batteryChannelsLazyRow = rowCount++;
         batteryMutedRow = rowCount++;
         batterySyncRow = rowCount++;
+        batteryDiaryRow = rowCount++;
+        batteryDiarySendRow = rowCount++;
         batteryInfoRow = rowCount++;
 
         saveToGallerySectionRow = rowCount++;
@@ -359,6 +364,13 @@ public class DataSettingsActivity extends BaseFragment {
                 BatteryPolicy.setPrefetchMutedMedia(!BatteryPolicy.prefetchMutedMedia());
                 if (view instanceof TextCheckCell) {
                     ((TextCheckCell) view).setChecked(!BatteryPolicy.prefetchMutedMedia());
+                }
+            } else if (position == batteryDiaryRow) {
+                BatteryDiary.share(getParentActivity());
+            } else if (position == batteryDiarySendRow) {
+                BatteryDiary.setAutoSendEnabled(!BatteryDiary.autoSendEnabled());
+                if (view instanceof TextCheckCell) {
+                    ((TextCheckCell) view).setChecked(BatteryDiary.autoSendEnabled());
                 }
             } else if (position == batterySyncRow) {
                 Dialog dlg = AlertsCreator.createSingleChoiceDialog(getParentActivity(), new String[]{
@@ -750,7 +762,11 @@ public class DataSettingsActivity extends BaseFragment {
                     textCell.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
                     if (position == batterySyncRow) {
                         textCell.setIcon(0);
-                        textCell.setTextAndValue(LocaleController.getString(R.string.BatterySync), batterySyncModeName(BatteryPolicy.backgroundSyncMode()), false);
+                        textCell.setTextAndValue(LocaleController.getString(R.string.BatterySync), batterySyncModeName(BatteryPolicy.backgroundSyncMode()), true);
+                    } else if (position == batteryDiaryRow) {
+                        textCell.setIcon(0);
+                        File diary = BatteryDiary.getFile();
+                        textCell.setTextAndValue(LocaleController.getString(R.string.BatteryDiary), diary.exists() ? AndroidUtilities.formatFileSize(diary.length()) : "", true);
                     } else if (position == useLessDataForCallsRow) {
                         textCell.setIcon(0);
                         SharedPreferences preferences = MessagesController.getGlobalMainSettings();
@@ -829,6 +845,8 @@ public class DataSettingsActivity extends BaseFragment {
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryChannelsLazy), !BatteryPolicy.prefetchChannelMedia(), true);
                     } else if (position == batteryMutedRow) {
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryMutedLazy), !BatteryPolicy.prefetchMutedMedia(), true);
+                    } else if (position == batteryDiarySendRow) {
+                        checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryDiaryAutoSend), BatteryDiary.autoSendEnabled(), false);
                     }
                     break;
                 }
@@ -999,7 +1017,7 @@ public class DataSettingsActivity extends BaseFragment {
                 return 0;
             } else if (position == mediaDownloadSectionRow || position == streamSectionRow || position == callsSectionRow || position == usageSectionRow || position == proxySectionRow || position == autoplayHeaderRow || position == saveToGallerySectionRow || position == batterySectionRow) {
                 return 2;
-            } else if (position == enableCacheStreamRow || position == enableStreamRow || position == enableAllStreamRow || position == enableMkvRow || position == autoplayGifsRow || position == autoplayVideoRow || position == batteryForegroundOnlyRow || position == batteryChannelsLazyRow || position == batteryMutedRow) {
+            } else if (position == enableCacheStreamRow || position == enableStreamRow || position == enableAllStreamRow || position == enableMkvRow || position == autoplayGifsRow || position == autoplayVideoRow || position == batteryForegroundOnlyRow || position == batteryChannelsLazyRow || position == batteryMutedRow || position == batteryDiarySendRow) {
                 return 3;
             } else if (position == enableAllStreamInfoRow || position == batteryInfoRow) {
                 return 4;

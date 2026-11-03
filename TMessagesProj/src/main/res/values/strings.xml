@@ -11639,5 +11639,10 @@
     <string name="BatterySyncAlways">Always</string>
     <string name="BatterySyncWifiOrCharging">On Wi-Fi or while charging</string>
     <string name="BatterySyncNever">Never</string>
-    <string name="BatteryInfo">Media held back here loads the moment you open its chat. Notifications always arrive; background sync only decides whether a notification also wakes the connection to fetch new messages before you open the app. Calls are never held back. Android\'s battery saver applies the strictest settings automatically.</string>
+    <string name="BatteryDiary">Battery diary</string>
+    <string name="BatteryDiaryAutoSend">Send the diary to Saved Messages daily</string>
+    <string name="CallsSystemIntegration">System call integration</string>
+    <string name="CallsSystemIntegrationInfo">Route calls through Android\'s phone framework: Bluetooth and car controls, the call log, no clash with cellular calls. Restart Telegram to apply.</string>
+    <string name="CallsSystemIntegrationRestart">Restart Telegram to apply</string>
+    <string name="BatteryInfo">Media held back here loads the moment you open its chat. Notifications always arrive; background sync only decides whether a notification also wakes the connection to fetch new messages before you open the app. Calls are never held back. Android\'s battery saver applies the strictest settings automatically. The battery diary records what the app does in the background: tap it to share, or let a copy go to Saved Messages once a day.</string>
 </resources>

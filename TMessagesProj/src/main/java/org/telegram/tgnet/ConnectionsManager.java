@@ -739,7 +739,9 @@ public class ConnectionsManager extends BaseController {
 
     /** A push arrived: wake the socket to sync, unless the fork's background sync policy says the notification is enough for now. */
     public void resumeNetworkForPush(String locKey) {
-        if (!org.telegram.messenger.BatteryPolicy.shouldSyncOnPush(locKey)) {
+        final boolean wake = org.telegram.messenger.BatteryPolicy.shouldSyncOnPush(locKey);
+        org.telegram.messenger.BatteryDiary.push(locKey, wake);
+        if (!wake) {
             if (BuildVars.LOGS_ENABLED) {
                 FileLog.d("push " + locKey + ": not waking the network (battery policy)");
             }
@@ -850,6 +852,7 @@ public class ConnectionsManager extends BaseController {
     public static void onConnectionStateChanged(final int state, final int currentAccount) {
         AndroidUtilities.runOnUIThread(() -> {
             getInstance(currentAccount).connectionState = state;
+            org.telegram.messenger.BatteryDiary.connection(currentAccount, state);
             AccountInstance.getInstance(currentAccount).getNotificationCenter().postNotificationName(NotificationCenter.didUpdateConnectionState);
         });
     }

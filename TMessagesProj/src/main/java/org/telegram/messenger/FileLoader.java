@@ -1162,6 +1162,7 @@ public class FileLoader extends BaseController {
         } else {
             fileName = null;
         }
+        BatteryDiary.download(fileName, document != null ? document.size : locationSize, priority);
         Runnable runnable = () -> loadFileInternal(document, secureDocument, webDocument, location, imageLocation, parentObject, locationExt, locationSize, priority, null, 0, false, cacheType);
         if (cacheType != 10 && !TextUtils.isEmpty(fileName) && !fileName.contains("" + Integer.MIN_VALUE)) {
             LoadOperationUIObject uiObject = new FileLoader.LoadOperationUIObject();

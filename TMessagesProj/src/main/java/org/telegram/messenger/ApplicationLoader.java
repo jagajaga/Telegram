@@ -296,6 +296,7 @@ public class ApplicationLoader extends Application {
         if (BuildVars.LOGS_ENABLED) {
             FileLog.d(helloWorld);
             FileLog.d("app start time = " + (startTime = SystemClock.elapsedRealtime()));
+            BatteryDiary.processStarted();
             try {
                 final PackageInfo info = ApplicationLoader.applicationContext.getPackageManager().getPackageInfo(ApplicationLoader.applicationContext.getPackageName(), 0);
                 final String abi;

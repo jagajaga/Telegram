@@ -3293,6 +3293,7 @@ public class NotificationsController extends BaseController implements Notificat
             int minutes = preferences.getInt("repeat_messages", 60);
             if (minutes > 0 && personalCount > 0) {
                 alarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + minutes * 60 * 1000, pintent);
+                BatteryDiary.log("repeat notifications alarm scheduled in " + minutes + " min");
             } else {
                 alarmManager.cancel(pintent);
             }

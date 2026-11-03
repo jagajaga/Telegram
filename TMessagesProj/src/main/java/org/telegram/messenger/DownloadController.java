@@ -1133,6 +1133,7 @@ public class DownloadController extends BaseController implements NotificationCe
         if (objects.isEmpty() || !BatteryPolicy.canAutoDownloadNow()) {
             return;
         }
+        BatteryDiary.prefetch(type, objects.size());
         ArrayList<DownloadObject> queue;
         if (type == AUTODOWNLOAD_TYPE_PHOTO) {
             queue = photoDownloadQueue;

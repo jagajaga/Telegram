@@ -69,7 +69,15 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           TELEGRAM_APP_ID: ${{ secrets.TELEGRAM_APP_ID }}
           TELEGRAM_APP_HASH: ${{ secrets.TELEGRAM_APP_HASH }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
         run: |
+          if [ -n "$GOOGLE_MAPS_API_KEY" ]; then
+            # the committed key is restricted to Telegram's own signing certificate
+            sed -i "s/AIzaSyA-t0jLPjUt2FxrA8VPK2EiYHcYcboIR6k/${GOOGLE_MAPS_API_KEY}/g" TMessagesProj/config/*/AndroidManifest*.xml
+            echo "google maps: own api key"
+          else
+            echo "::warning::GOOGLE_MAPS_API_KEY not set; maps will not render with this signing key"
+          fi
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > TMessagesProj/config/release.keystore
             echo "signing: fork keystore"

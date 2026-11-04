@@ -1823,6 +1823,8 @@ public class PushListenerController {
                                     if (BuildVars.LOGS_ENABLED) {
                                         FileLog.d("Failed to get regid");
                                     }
+                                    Exception error = task.getException();
+                                    BatteryDiary.log("push token: firebase failed: " + (error == null ? "no exception" : error.getClass().getSimpleName() + ": " + error.getMessage() + (error.getCause() != null ? " / " + error.getCause().getClass().getSimpleName() + ": " + error.getCause().getMessage() : "")));
                                     SharedConfig.pushStringStatus = "__FIREBASE_FAILED__";
                                     PushListenerController.sendRegistrationToServer(getPushType(), null);
                                     return;

@@ -199,6 +199,12 @@ public class ApplicationLoaderImpl extends ApplicationLoader {
     }
 
     @Override
+    protected IMapsProvider onCreateMapsProvider() {
+        // this build is not signed with Telegram's certificate, so its Google Maps key is useless here
+        return new OsmMapsProvider();
+    }
+
+    @Override
     public boolean isCustomUpdate() {
         return !TextUtils.isEmpty(org.telegram.messenger.BuildConfig.BETA_URL);
     }

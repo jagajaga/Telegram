@@ -1183,6 +1183,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 	}
 
 	private void acknowledgeCall(final boolean startRinging) {
+		BatteryDiary.log("call: incoming received (ring now: " + startRinging + ", system call integration " + (USE_CONNECTION_SERVICE ? "on" : "off") + ")");
 		if (privateCall == null) {
 			if (BuildVars.LOGS_ENABLED) {
 				FileLog.w("Call is null, wtf");

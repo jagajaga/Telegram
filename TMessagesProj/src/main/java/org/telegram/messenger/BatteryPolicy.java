@@ -232,22 +232,29 @@ public class BatteryPolicy {
                 }
             }
             boolean backgroundConnection = false;
+            StringBuilder accounts = new StringBuilder();
             for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
                 if (UserConfig.getInstance(a).isClientActivated()) {
-                    backgroundConnection |= MessagesController.getNotificationsSettings(a).getBoolean("pushConnection", MessagesController.getInstance(a).backgroundConnection);
+                    boolean on = MessagesController.getNotificationsSettings(a).getBoolean("pushConnection", MessagesController.getInstance(a).backgroundConnection);
+                    backgroundConnection |= on;
+                    accounts.append(accounts.length() == 0 ? "" : ",").append("account").append(a).append(on ? ":on" : ":off");
                 }
             }
-            BatteryDiary.log("calls check: notifications " + (notificationsEnabled ? "on" : "OFF") + ", incoming-call channel " + callsChannel + ", push token " + (tokenMissing ? "MISSING (" + SharedConfig.pushStringStatus + ")" : "ok") + ", background connection " + (backgroundConnection ? "on" : "off"));
-            // Switched on once, not on every foreground: turning it off afterwards is the user's call.
-            if (tokenMissing && !backgroundConnection && !prefs().getBoolean("pushConnectionApplied", false)) {
-                prefs().edit().putBoolean("pushConnectionApplied", true).apply();
+            BatteryDiary.log("calls check: notifications " + (notificationsEnabled ? "on" : "OFF") + ", incoming-call channel " + callsChannel + ", push token " + (tokenMissing ? "MISSING (" + SharedConfig.pushStringStatus + ")" : "ok") + ", background connection " + (backgroundConnection ? "on (" + accounts + ")" : "off"));
+            // Switched on once, for the selected account only (every account with it on keeps its own
+            // socket and its own 3-minute ping); other accounts can be switched on in their own
+            // Notifications and Sounds. Turning it off afterwards is the user's call.
+            if (tokenMissing && !prefs().getBoolean("pushConnectionApplied2", false)) {
+                prefs().edit().putBoolean("pushConnectionApplied2", true).apply();
+                int selected = UserConfig.selectedAccount;
                 for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
                     if (UserConfig.getInstance(a).isClientActivated()) {
-                        MessagesController.getNotificationsSettings(a).edit().putBoolean("pushConnection", true).apply();
-                        ConnectionsManager.getInstance(a).setPushConnectionEnabled(true);
+                        boolean on = a == selected;
+                        MessagesController.getNotificationsSettings(a).edit().putBoolean("pushConnection", on).apply();
+                        ConnectionsManager.getInstance(a).setPushConnectionEnabled(on);
                     }
                 }
-                BatteryDiary.log("calls check: no push token, background connection switched on so calls still ring");
+                BatteryDiary.log("calls check: no push token, background connection on for account" + selected + " (selected) only");
             }
         } catch (Throwable e) {
             FileLog.e(e);

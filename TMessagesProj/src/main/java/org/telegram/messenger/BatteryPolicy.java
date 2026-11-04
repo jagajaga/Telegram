@@ -203,10 +203,21 @@ public class BatteryPolicy {
      * other way to hear about a call is Telegram's own background connection, so switch it on.
      * Also records the state of everything a ringing call depends on.
      */
+    /** Whether this build can receive Google push notifications at all. */
+    public static boolean pushAvailable() {
+        return !TextUtils.isEmpty(SharedConfig.pushString) && !(SharedConfig.pushStringStatus != null && SharedConfig.pushStringStatus.startsWith("__"));
+    }
+
+    private static long lastCallsCheck;
+
     public static void ensureCallsReachable() {
         try {
+            if (System.currentTimeMillis() - lastCallsCheck < 60L * 60 * 1000) {
+                return;
+            }
+            lastCallsCheck = System.currentTimeMillis();
             Context context = ApplicationLoader.applicationContext;
-            boolean tokenMissing = TextUtils.isEmpty(SharedConfig.pushString) || SharedConfig.pushStringStatus != null && SharedConfig.pushStringStatus.startsWith("__");
+            boolean tokenMissing = !pushAvailable();
             boolean notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled();
             String callsChannel = "n/a";
             if (Build.VERSION.SDK_INT >= 26) {
@@ -227,7 +238,9 @@ public class BatteryPolicy {
                 }
             }
             BatteryDiary.log("calls check: notifications " + (notificationsEnabled ? "on" : "OFF") + ", incoming-call channel " + callsChannel + ", push token " + (tokenMissing ? "MISSING (" + SharedConfig.pushStringStatus + ")" : "ok") + ", background connection " + (backgroundConnection ? "on" : "off"));
-            if (tokenMissing && !backgroundConnection) {
+            // Switched on once, not on every foreground: turning it off afterwards is the user's call.
+            if (tokenMissing && !backgroundConnection && !prefs().getBoolean("pushConnectionApplied", false)) {
+                prefs().edit().putBoolean("pushConnectionApplied", true).apply();
                 for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
                     if (UserConfig.getInstance(a).isClientActivated()) {
                         MessagesController.getNotificationsSettings(a).edit().putBoolean("pushConnection", true).apply();

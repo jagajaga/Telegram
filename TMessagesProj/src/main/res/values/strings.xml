@@ -11641,6 +11641,7 @@
     <string name="BatterySyncAlways">Always</string>
     <string name="BatterySyncWifiOrCharging">On Wi-Fi or while charging</string>
     <string name="BatterySyncNever">Never</string>
+    <string name="BatteryInfoNoPush">Media held back here loads the moment you open its chat. This build cannot receive Google push notifications (Telegram\'s push key is tied to its own signing certificate), so it keeps Telegram\'s low-impact background connection for notifications and calls — leave Background Connection on in Notifications and Sounds. Calls are never held back. The battery diary records what the app does in the background: tap it to share, or let a copy go to Saved Messages once a day.</string>
     <string name="BatteryDiary">Battery diary</string>
     <string name="BatteryDiaryAutoSend">Send the diary to Saved Messages daily</string>
     <string name="CallsSystemIntegration">System call integration</string>

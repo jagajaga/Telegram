@@ -182,7 +182,7 @@ public class DataSettingsActivity extends BaseFragment {
         batteryForegroundOnlyRow = rowCount++;
         batteryChannelsLazyRow = rowCount++;
         batteryMutedRow = rowCount++;
-        batterySyncRow = rowCount++;
+        batterySyncRow = BatteryPolicy.pushAvailable() ? rowCount++ : -1;
         batteryDiaryRow = rowCount++;
         batteryDiarySendRow = rowCount++;
         batteryInfoRow = rowCount++;
@@ -855,7 +855,7 @@ public class DataSettingsActivity extends BaseFragment {
                     if (position == enableAllStreamInfoRow) {
                         cell.setText(LocaleController.getString(R.string.EnableAllStreamingInfo));
                     } else if (position == batteryInfoRow) {
-                        cell.setText(LocaleController.getString(R.string.BatteryInfo));
+                        cell.setText(LocaleController.getString(BatteryPolicy.pushAvailable() ? R.string.BatteryInfo : R.string.BatteryInfoNoPush));
                     }
                     break;
                 }

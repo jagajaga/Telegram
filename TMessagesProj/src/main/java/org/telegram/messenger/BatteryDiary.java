@@ -162,7 +162,7 @@ public class BatteryDiary {
         if (!ApplicationLoader.mainInterfacePaused) {
             if (!connectedAfterForegroundLogged && foregroundAt != 0 && state == ConnectionsManager.ConnectionStateConnected) {
                 connectedAfterForegroundLogged = true;
-                log("connected " + (SystemClock.elapsedRealtime() - foregroundAt) + " ms after foreground (account" + account + ")");
+                log("connected " + (SystemClock.elapsedRealtime() - foregroundAt) + " ms after foreground (account" + account + (account == UserConfig.selectedAccount ? ", selected" : "") + ")");
             } else if (!connectedAfterForegroundLogged && foregroundAt != 0 && SystemClock.elapsedRealtime() - foregroundAt < 30000) {
                 log("connection account" + account + " " + connectionStateName(state) + " (" + (SystemClock.elapsedRealtime() - foregroundAt) + " ms after foreground)");
             }

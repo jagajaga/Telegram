@@ -742,6 +742,7 @@ public class ConnectionsManager extends BaseController {
         final boolean wake = org.telegram.messenger.BatteryPolicy.shouldSyncOnPush(locKey);
         org.telegram.messenger.BatteryDiary.push(locKey, wake);
         if (!wake) {
+            org.telegram.messenger.BatteryPolicy.onPushLeftUnsynced();
             if (BuildVars.LOGS_ENABLED) {
                 FileLog.d("push " + locKey + ": not waking the network (battery policy)");
             }

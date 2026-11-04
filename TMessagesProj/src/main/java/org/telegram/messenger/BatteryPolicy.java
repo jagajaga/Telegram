@@ -1,11 +1,20 @@
 package org.telegram.messenger;
 
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.os.BatteryManager;
+import android.os.Build;
 import android.os.PowerManager;
+import android.text.TextUtils;
+
+import androidx.core.app.NotificationManagerCompat;
+
+import org.telegram.tgnet.ConnectionsManager;
 
 import org.telegram.tgnet.TLRPC;
 
@@ -148,6 +157,87 @@ public class BatteryPolicy {
                 return false;
             default:
                 return isCharging() || ApplicationLoader.isConnectedToWiFi();
+        }
+    }
+
+    private static int unsyncedPushes;
+
+    /** A push arrived while the app was in the background and the policy did not wake the connection. */
+    public static void onPushLeftUnsynced() {
+        unsyncedPushes++;
+    }
+
+    /**
+     * The phone was unlocked. If pushes arrived that were not synced, wake the connection now: by the
+     * time Telegram is opened it is connected and caught up, instead of showing "Connecting…" first.
+     */
+    private static void onUserPresent() {
+        if (!ApplicationLoader.mainInterfacePaused || unsyncedPushes == 0) {
+            return;
+        }
+        int pending = unsyncedPushes;
+        unsyncedPushes = 0;
+        BatteryDiary.log("unlock: pre-warming the connection (" + pending + " unsynced push(es))");
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            if (UserConfig.getInstance(a).isClientActivated()) {
+                ConnectionsManager.getInstance(a).resumeNetworkMaybe();
+            }
+        }
+    }
+
+    public static void installUnlockWarmup(Context context) {
+        try {
+            context.registerReceiver(new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context c, Intent intent) {
+                    AndroidUtilities.runOnUIThread(BatteryPolicy::onUserPresent);
+                }
+            }, new IntentFilter(Intent.ACTION_USER_PRESENT));
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+    }
+
+    /**
+     * Calls must ring. They arrive as a push; when no push token could be registered, the only
+     * other way to hear about a call is Telegram's own background connection, so switch it on.
+     * Also records the state of everything a ringing call depends on.
+     */
+    public static void ensureCallsReachable() {
+        try {
+            Context context = ApplicationLoader.applicationContext;
+            boolean tokenMissing = TextUtils.isEmpty(SharedConfig.pushString) || SharedConfig.pushStringStatus != null && SharedConfig.pushStringStatus.startsWith("__");
+            boolean notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled();
+            String callsChannel = "n/a";
+            if (Build.VERSION.SDK_INT >= 26) {
+                NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+                for (NotificationChannel channel : nm.getNotificationChannels()) {
+                    if (channel.getId().startsWith("incoming_calls")) {
+                        callsChannel = "importance " + channel.getImportance();
+                    }
+                }
+                if (Build.VERSION.SDK_INT >= 34) {
+                    callsChannel += nm.canUseFullScreenIntent() ? ", full-screen allowed" : ", FULL-SCREEN DENIED";
+                }
+            }
+            boolean backgroundConnection = false;
+            for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                if (UserConfig.getInstance(a).isClientActivated()) {
+                    backgroundConnection |= MessagesController.getNotificationsSettings(a).getBoolean("pushConnection", MessagesController.getInstance(a).backgroundConnection);
+                }
+            }
+            BatteryDiary.log("calls check: notifications " + (notificationsEnabled ? "on" : "OFF") + ", incoming-call channel " + callsChannel + ", push token " + (tokenMissing ? "MISSING (" + SharedConfig.pushStringStatus + ")" : "ok") + ", background connection " + (backgroundConnection ? "on" : "off"));
+            if (tokenMissing && !backgroundConnection) {
+                for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                    if (UserConfig.getInstance(a).isClientActivated()) {
+                        MessagesController.getNotificationsSettings(a).edit().putBoolean("pushConnection", true).apply();
+                        ConnectionsManager.getInstance(a).setPushConnectionEnabled(true);
+                    }
+                }
+                BatteryDiary.log("calls check: no push token, background connection switched on so calls still ring");
+            }
+        } catch (Throwable e) {
+            FileLog.e(e);
         }
     }
 

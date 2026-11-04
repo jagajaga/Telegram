@@ -297,6 +297,7 @@ public class ApplicationLoader extends Application {
             FileLog.d(helloWorld);
             FileLog.d("app start time = " + (startTime = SystemClock.elapsedRealtime()));
             BatteryDiary.processStarted();
+            BatteryPolicy.installUnlockWarmup(applicationContext);
             try {
                 final PackageInfo info = ApplicationLoader.applicationContext.getPackageManager().getPackageInfo(ApplicationLoader.applicationContext.getPackageName(), 0);
                 final String abi;

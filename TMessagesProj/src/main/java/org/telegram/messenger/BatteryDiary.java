@@ -56,6 +56,8 @@ public class BatteryDiary {
     private static int sessionPrefetched;
     private static int sessionAlarms;
     private static int sessionConnections;
+    private static long foregroundAt;
+    private static boolean connectedAfterForegroundLogged;
 
     private static SharedPreferences prefs() {
         return ApplicationLoader.applicationContext.getSharedPreferences("battery", Context.MODE_PRIVATE);
@@ -98,7 +100,10 @@ public class BatteryDiary {
             inBackground = false;
             startSession();
         }
+        foregroundAt = SystemClock.elapsedRealtime();
+        connectedAfterForegroundLogged = false;
         log("foreground");
+        AndroidUtilities.runOnUIThread(BatteryPolicy::ensureCallsReachable, 1500);
         maybeAutoSend();
     }
 
@@ -155,6 +160,12 @@ public class BatteryDiary {
 
     public static void connection(int account, int state) {
         if (!ApplicationLoader.mainInterfacePaused) {
+            if (!connectedAfterForegroundLogged && foregroundAt != 0 && state == ConnectionsManager.ConnectionStateConnected) {
+                connectedAfterForegroundLogged = true;
+                log("connected " + (SystemClock.elapsedRealtime() - foregroundAt) + " ms after foreground (account" + account + ")");
+            } else if (!connectedAfterForegroundLogged && foregroundAt != 0 && SystemClock.elapsedRealtime() - foregroundAt < 30000) {
+                log("connection account" + account + " " + connectionStateName(state) + " (" + (SystemClock.elapsedRealtime() - foregroundAt) + " ms after foreground)");
+            }
             return;
         }
         synchronized (sessionLock) {

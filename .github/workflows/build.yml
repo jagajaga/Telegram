@@ -47,7 +47,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.sha }}
-          fetch-depth: 1
+          fetch-depth: 300
 
       - name: Submodules at their pinned commits (shallow)
         run: .github/scripts/init-submodules.sh "$GITHUB_WORKSPACE"
@@ -101,6 +101,16 @@ jobs:
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "tag=v${name}-fork.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           echo "version $name, code $code (upstream $upstream_code)"
+
+      - name: Changelog asset
+        run: |
+          {
+            echo "Build ${{ steps.version.outputs.tag }}, commit ${GITHUB_SHA::7}, $(date -u +%Y-%m-%d)"
+            echo
+            echo "Changes, newest first:"
+            git log --first-parent --date=short --format='%ad  %s' -n 200 HEAD
+          } > TMessagesProj_AppHockeyApp/src/main/assets/fork-changelog.txt
+          head -5 TMessagesProj_AppHockeyApp/src/main/assets/fork-changelog.txt
 
       - uses: gradle/actions/setup-gradle@v4
 

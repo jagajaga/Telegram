@@ -1,0 +1,2 @@
+Generated at build time from the git log (see .github/workflows/build.yml).
+This copy was built locally without a changelog.

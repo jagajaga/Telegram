@@ -5049,11 +5049,21 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 
 	private void updateBluetoothHeadsetState_impl(boolean connected) {
 		if (connected == isBtHeadsetConnected) {
+			if (connected && audioConfigured && !bluetoothScoActive && !bluetoothScoConnecting && audioRouteToSet == AUDIO_ROUTE_BLUETOOTH && !isRinging() && !hasRtmpStream()) {
+				// the headset was reported before its audio device existed; now that a device appeared, route to it
+				BatteryDiary.log("bluetooth: headset known but not routed yet, routing now");
+				needSwitchToBluetoothAfterScoActivates = true;
+				try {
+					VoipAudioManager.get().startBluetooth();
+				} catch (Throwable ignore) {
+				}
+			}
 			return;
 		}
 		if (BuildVars.LOGS_ENABLED) {
 			FileLog.d("updateBluetoothHeadsetState: " + connected);
 		}
+		BatteryDiary.log("bluetooth: headset " + (connected ? "connected" : "disconnected") + (currentBluetoothDeviceName != null ? " (" + currentBluetoothDeviceName + ")" : ""));
 		isBtHeadsetConnected = connected;
 		final AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
 		final VoipAudioManager vam = VoipAudioManager.get();

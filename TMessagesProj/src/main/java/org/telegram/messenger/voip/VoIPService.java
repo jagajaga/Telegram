@@ -214,6 +214,16 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 	// call handling for the rest of the process (see fallBackFromConnectionService).
 	public static boolean USE_CONNECTION_SERVICE = isDeviceCompatibleWithConnectionServiceAPI();
 	private static final long CONNECTION_SERVICE_INCOMING_UI_TIMEOUT = 3000;
+	private Runnable connectionServiceOutgoingWatchdog;
+
+	/**
+	 * Whether Telecom is handling <i>this</i> call. Audio routing, Bluetooth and audio focus must
+	 * follow this, not the static switch: a call that Telecom did not take has to be routed by
+	 * Telegram itself, otherwise it plays through the earpiece with a dead route button.
+	 */
+	private boolean usingSystemCall() {
+		return USE_CONNECTION_SERVICE && systemCallConnection != null;
+	}
 	private Runnable connectionServiceIncomingUiWatchdog;
 
 	private int currentAccount = -1;
@@ -403,7 +413,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 				am.removeOnCommunicationDeviceChangedListener(communicationDeviceListener);
 				communicationDeviceListener = null;
 			}
-			if (!USE_CONNECTION_SERVICE && sharedInstance == null) {
+			if (!usingSystemCall() && sharedInstance == null) {
 				if (isBtHeadsetConnected) {
 					vam.stopBluetooth();
 					vam.setBluetoothOn(false);
@@ -914,6 +924,12 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 					extras.putBundle(TelecomManager.EXTRA_OUTGOING_CALL_EXTRAS, myExtras);
 					ContactsController.getInstance(currentAccount).createOrUpdateConnectionServiceContact(user.id, user.first_name, user.last_name);
 					tm.placeCall(Uri.fromParts("tel", "+99084" + user.id, null), extras);
+					AndroidUtilities.runOnUIThread(connectionServiceOutgoingWatchdog = () -> {
+						connectionServiceOutgoingWatchdog = null;
+						if (systemCallConnection == null) {
+							fallBackFromConnectionService("the system did not create the outgoing connection within " + CONNECTION_SERVICE_INCOMING_UI_TIMEOUT + " ms");
+						}
+					}, CONNECTION_SERVICE_INCOMING_UI_TIMEOUT);
 				} else {
 					delayedStartOutgoingCall = () -> {
 						delayedStartOutgoingCall = null;
@@ -3616,7 +3632,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 	}
 
 	public boolean hasEarpiece() {
-		if (USE_CONNECTION_SERVICE) {
+		if (usingSystemCall()) {
 			if (systemCallConnection != null && systemCallConnection.getCallAudioState() != null) {
 				int routeMask = systemCallConnection.getCallAudioState().getSupportedRouteMask();
 				return (routeMask & (CallAudioState.ROUTE_EARPIECE | CallAudioState.ROUTE_WIRED_HEADSET)) != 0;
@@ -3824,7 +3840,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 			} else {
 				systemCallConnection.setAudioRoute(systemCallConnection.getCallAudioState().getRoute() == CallAudioState.ROUTE_BLUETOOTH ? CallAudioState.ROUTE_WIRED_OR_EARPIECE : CallAudioState.ROUTE_BLUETOOTH);
 			}
-		} else if (audioConfigured && !USE_CONNECTION_SERVICE) {
+		} else if (audioConfigured && !usingSystemCall()) {
 			VoipAudioManager vam = VoipAudioManager.get();
 			if (hasEarpiece()) {
 				vam.setSpeakerphoneOn(!vam.isSpeakerphoneOn());
@@ -3863,7 +3879,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 					systemCallConnection.setAudioRoute(CallAudioState.ROUTE_SPEAKER);
 					break;
 			}
-		} else if (audioConfigured && !USE_CONNECTION_SERVICE) {
+		} else if (audioConfigured && !usingSystemCall()) {
 			switch (which) {
 				case 2:
 					if (!bluetoothScoActive) {
@@ -3928,7 +3944,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 		if (USE_CONNECTION_SERVICE && systemCallConnection != null && systemCallConnection.getCallAudioState() != null) {
 			int route = systemCallConnection.getCallAudioState().getRoute();
 			return hasEarpiece() ? route == CallAudioState.ROUTE_SPEAKER : route == CallAudioState.ROUTE_BLUETOOTH;
-		} else if (audioConfigured && !USE_CONNECTION_SERVICE) {
+		} else if (audioConfigured && !usingSystemCall()) {
 			VoipAudioManager vam = VoipAudioManager.get();
 			return hasEarpiece() ? vam.isSpeakerphoneOn() : vam.isBluetoothOn();
 		}
@@ -3936,7 +3952,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 	}
 
 	public int getCurrentAudioRoute() {
-		if (USE_CONNECTION_SERVICE) {
+		if (usingSystemCall()) {
 			if (systemCallConnection != null && systemCallConnection.getCallAudioState() != null) {
 				switch (systemCallConnection.getCallAudioState().getRoute()) {
 					case CallAudioState.ROUTE_BLUETOOTH:
@@ -4081,7 +4097,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 					ringtonePlayer.setAudioStreamType(AudioManager.STREAM_VOICE_CALL);
 				} else {
 					ringtonePlayer.setAudioStreamType(AudioManager.STREAM_RING);
-					if (!USE_CONNECTION_SERVICE) {
+					if (!usingSystemCall()) {
 						int focusResult = am.requestAudioFocus(this, AudioManager.STREAM_RING, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
 						hasAudioFocus = focusResult == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
 					}
@@ -4218,7 +4234,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 		AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
 		if (!playingSound) {
 			VoipAudioManager vam = VoipAudioManager.get();
-			if (!USE_CONNECTION_SERVICE) {
+			if (!usingSystemCall()) {
 				if (isBtHeadsetConnected || bluetoothScoActive || bluetoothScoConnecting) {
 					vam.stopBluetooth();
 					vam.setBluetoothOn(false);
@@ -4492,6 +4508,10 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 			}
 			systemCallConnection = new CallConnection();
 			systemCallConnection.setInitializing();
+			if (connectionServiceOutgoingWatchdog != null) {
+				AndroidUtilities.cancelRunOnUIThread(connectionServiceOutgoingWatchdog);
+				connectionServiceOutgoingWatchdog = null;
+			}
 			if (isOutgoing) {
 				delayedStartOutgoingCall = () -> {
 					delayedStartOutgoingCall = null;
@@ -4659,7 +4679,8 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 
 			IntentFilter filter = new IntentFilter();
 			filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
-			if (!USE_CONNECTION_SERVICE) {
+			{
+				// always: the call may end up routed by Telegram itself when Telecom does not take it
 				filter.addAction(ACTION_HEADSET_PLUG);
 				if (btAdapter != null) {
 					filter.addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED);
@@ -4751,7 +4772,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 	}
 
 	private void checkUpdateBluetoothHeadset() {
-		if (!USE_CONNECTION_SERVICE && btAdapter != null && btAdapter.isEnabled()) {
+		if (!usingSystemCall() && btAdapter != null && btAdapter.isEnabled()) {
 			try {
 				MediaRouter mr = (MediaRouter) getSystemService(Context.MEDIA_ROUTER_SERVICE);
 				AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
@@ -4862,7 +4883,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 
 		needPlayEndSound = true;
 		AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
-		if (!USE_CONNECTION_SERVICE) {
+		if (!usingSystemCall()) {
 			Utilities.globalQueue.postRunnable(() -> {
 				try {
 					if (hasRtmpStream()) {
@@ -5020,6 +5041,13 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 	}
 
 	private void updateBluetoothHeadsetState(boolean connected) {
+		if (usingSystemCall()) {
+			return; // Telecom routes this call
+		}
+		updateBluetoothHeadsetState_impl(connected);
+	}
+
+	private void updateBluetoothHeadsetState_impl(boolean connected) {
 		if (connected == isBtHeadsetConnected) {
 			return;
 		}
@@ -5461,6 +5489,10 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 			AndroidUtilities.cancelRunOnUIThread(connectionServiceIncomingUiWatchdog);
 			connectionServiceIncomingUiWatchdog = null;
 		}
+		if (connectionServiceOutgoingWatchdog != null) {
+			AndroidUtilities.cancelRunOnUIThread(connectionServiceOutgoingWatchdog);
+			connectionServiceOutgoingWatchdog = null;
+		}
 		if (systemCallConnection != null) {
 			try {
 				systemCallConnection.setDisconnected(new DisconnectCause(DisconnectCause.ERROR));
@@ -5819,8 +5851,14 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 			setAudioModeIsVoip(true);
 		}
 
+		private int loggedRouteMask = -1;
+
 		@Override
 		public void onCallAudioStateChanged(CallAudioState state) {
+			if (state != null && state.getSupportedRouteMask() != loggedRouteMask) {
+				loggedRouteMask = state.getSupportedRouteMask();
+				BatteryDiary.log("call: system audio routes " + loggedRouteMask + " (bluetooth " + ((loggedRouteMask & CallAudioState.ROUTE_BLUETOOTH) != 0 ? "offered" : "NOT offered") + "), current " + state.getRoute());
+			}
 			if (BuildVars.LOGS_ENABLED) {
 				FileLog.d("ConnectionService call audio state changed: " + state);
 			}

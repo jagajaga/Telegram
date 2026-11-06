@@ -244,7 +244,7 @@ public class BatteryPolicy {
                     accounts.append(accounts.length() == 0 ? "" : ",").append("account").append(a).append(on ? ":on" : ":off");
                 }
             }
-            BatteryDiary.log("efficiency: animation flags " + LiteMode.getValue() + " (power saver level " + LiteMode.getPowerSaverLevel() + "), 60 Hz cap " + (refreshRateCap() ? "on" : "off") + ", animations at 30 fps " + (efficientAnimations() ? "on" : "off") + ", display " + displayState() + ", stories on mobile " + (preloadStoriesOnMobile() ? "on" : "off"));
+            BatteryDiary.log("efficiency: animation flags " + LiteMode.getValue() + " (power saver level " + LiteMode.getPowerSaverLevel() + "), 60 Hz cap " + (refreshRateCap() ? "on" : "off") + ", animations at 30 fps " + (efficientAnimations() ? "on" : "off") + ", call screen 60 Hz " + (callScreen60Hz() ? "on" : "off") + ", display " + displayState() + ", stories on mobile " + (preloadStoriesOnMobile() ? "on" : "off"));
             BatteryDiary.log("calls check: notifications " + (notificationsEnabled ? "on" : "OFF") + ", incoming-call channel " + callsChannel + ", push token " + (tokenMissing ? "MISSING (" + SharedConfig.pushStringStatus + ")" : "ok") + ", background connection " + (backgroundConnection ? "on (" + accounts + ")" : "off"));
             // Switched on once, for the selected account only (every account with it on keeps its own
             // socket and its own 3-minute ping); other accounts can be switched on in their own
@@ -277,6 +277,55 @@ public class BatteryPolicy {
         prefs().edit().putBoolean("refreshRateCap", value).apply();
         if (LaunchActivity.instance != null) {
             applyRefreshRateCap(LaunchActivity.instance.getWindow());
+        }
+    }
+
+    /** The call screen's own window at 60 Hz: slow gradients and a timer gain nothing from 120. Default on. */
+    public static boolean callScreen60Hz() {
+        return prefs().getBoolean("callScreen60Hz", true);
+    }
+
+    public static void setCallScreen60Hz(boolean value) {
+        prefs().edit().putBoolean("callScreen60Hz", value).apply();
+    }
+
+    /** The display mode id of the ~60 Hz mode at the display's current resolution, or 0. */
+    private static int find60HzMode(Display display) {
+        try {
+            Display.Mode current = display.getMode();
+            int bestId = 0;
+            float bestRate = 0;
+            for (Display.Mode mode : display.getSupportedModes()) {
+                if (mode.getPhysicalWidth() != current.getPhysicalWidth() || mode.getPhysicalHeight() != current.getPhysicalHeight()) {
+                    continue;
+                }
+                float rate = mode.getRefreshRate();
+                if (rate <= 61f && rate > bestRate) {
+                    bestRate = rate;
+                    bestId = mode.getModeId();
+                }
+            }
+            return bestId;
+        } catch (Throwable e) {
+            return 0;
+        }
+    }
+
+    /** Applied to the call screen's window parameters before the window is added. */
+    public static void applyCallWindowRefreshRate(Context context, WindowManager.LayoutParams lp) {
+        if (lp == null || Build.VERSION.SDK_INT < 23 || !callScreen60Hz()) {
+            return;
+        }
+        try {
+            Display display = ((WindowManager) context.getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay();
+            int modeId = find60HzMode(display);
+            if (modeId != 0) {
+                lp.preferredDisplayModeId = modeId;
+            } else {
+                lp.preferredRefreshRate = 60f;
+            }
+        } catch (Throwable e) {
+            FileLog.e(e);
         }
     }
 
@@ -334,19 +383,7 @@ public class BatteryPolicy {
                 return;
             }
             Display display = window.getWindowManager().getDefaultDisplay();
-            Display.Mode current = display.getMode();
-            int bestId = 0;
-            float bestRate = 0;
-            for (Display.Mode mode : display.getSupportedModes()) {
-                if (mode.getPhysicalWidth() != current.getPhysicalWidth() || mode.getPhysicalHeight() != current.getPhysicalHeight()) {
-                    continue;
-                }
-                float rate = mode.getRefreshRate();
-                if (rate <= 61f && rate > bestRate) {
-                    bestRate = rate;
-                    bestId = mode.getModeId();
-                }
-            }
+            int bestId = find60HzMode(display);
             if (bestId != 0) {
                 lp.preferredDisplayModeId = bestId;
             } else {

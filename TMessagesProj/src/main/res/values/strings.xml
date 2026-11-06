@@ -11644,6 +11644,7 @@
     <string name="BatteryInfoNoPush">Media held back here loads the moment you open its chat. This build cannot receive Google push notifications (Telegram\'s push key is tied to its own signing certificate), so it keeps Telegram\'s low-impact background connection for notifications and calls — leave Background Connection on in Notifications and Sounds. Calls are never held back. The battery diary records what the app does in the background: tap it to share, or let a copy go to Saved Messages once a day.</string>
     <string name="BatteryRefreshRateCap">Limit refresh rate to 60 Hz</string>
     <string name="BatteryAnimations30">Animated stickers and emoji at 30 fps</string>
+    <string name="BatteryCallScreen60">Call screen at 60 Hz</string>
     <string name="BatteryStoriesMobile">Preload stories on mobile data</string>
     <string name="BatteryDiary">Battery diary</string>
     <string name="BatteryDiaryAutoSend">Send the diary to Saved Messages daily</string>

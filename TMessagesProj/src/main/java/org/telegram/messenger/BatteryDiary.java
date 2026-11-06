@@ -57,6 +57,7 @@ public class BatteryDiary {
     private static int sessionAlarms;
     private static int sessionConnections;
     private static long foregroundAt;
+    private static boolean sessionHadCall;
     private static boolean connectedAfterForegroundLogged;
 
     private static SharedPreferences prefs() {
@@ -188,6 +189,7 @@ public class BatteryDiary {
         sessionRx = TrafficStats.getUidRxBytes(Process.myUid());
         sessionTx = TrafficStats.getUidTxBytes(Process.myUid());
         sessionPushes = sessionPushWakes = sessionDownloads = sessionPrefetched = sessionAlarms = sessionConnections = 0;
+        sessionHadCall = org.telegram.messenger.voip.VoIPService.getSharedInstance() != null;
     }
 
     private static void endSession(String kind) {
@@ -198,8 +200,9 @@ public class BatteryDiary {
         long cpu = Process.getElapsedCpuTime() - sessionCpu;
         long rx = TrafficStats.getUidRxBytes(Process.myUid()) - sessionRx;
         long tx = TrafficStats.getUidTxBytes(Process.myUid()) - sessionTx;
-        log(String.format(Locale.US, "%s session %s: cpu %d ms, rx %s, tx %s, pushes %d (woke network %d), background downloads %d, prefetched %d, alarms %d, connection changes %d",
-            kind, formatDuration(duration), cpu, AndroidUtilities.formatFileSize(Math.max(0, rx)), AndroidUtilities.formatFileSize(Math.max(0, tx)),
+        boolean call = sessionHadCall || org.telegram.messenger.voip.VoIPService.getSharedInstance() != null;
+        log(String.format(Locale.US, "%s session %s%s: cpu %d ms, rx %s, tx %s, pushes %d (woke network %d), background downloads %d, prefetched %d, alarms %d, connection changes %d",
+            kind, formatDuration(duration), call ? " (call)" : "", cpu, AndroidUtilities.formatFileSize(Math.max(0, rx)), AndroidUtilities.formatFileSize(Math.max(0, tx)),
             sessionPushes, sessionPushWakes, sessionDownloads, sessionPrefetched, sessionAlarms, sessionConnections));
     }
 

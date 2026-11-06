@@ -235,7 +235,7 @@ void ConnectionsManager::select() {
             lastPushPingTime = now;
             uint8_t offset;
             RAND_bytes(&offset, 1);
-            nextPingTimeOffset = 60000 * 3 + (offset % 40) - 20;
+            nextPingTimeOffset = pushPingInterval + (offset % 40) - 20;
             if (datacenter != nullptr) {
                 sendPing(datacenter, true);
             }
@@ -754,6 +754,13 @@ void ConnectionsManager::onConnectionClosed(Connection *connection, int reason) 
         }
     } else if (connection->getConnectionType() == ConnectionTypePush) {
         if (LOGS_ENABLED) DEBUG_D("connection(%p) push connection closed", connection);
+        if (reason != 1 && lastPushPingTime != 0 && !sendingPushPing && getCurrentTimeMonotonicMillis() - lastPushPingTime < nextPingTimeOffset) {
+            // the socket died before the next keep-alive (carrier NAT timeout): ping sooner from now on
+            int32_t shorter = pushPingInterval * 2 / 3;
+            pushPingInterval = shorter < 45000 ? 45000 : shorter;
+            pushPingSuccesses = 0;
+            if (LOGS_ENABLED) DEBUG_D("push connection dropped between pings, interval now %d ms", pushPingInterval);
+        }
         sendingPushPing = false;
         lastPushPingTime = getCurrentTimeMonotonicMillis() - nextPingTimeOffset + 4000;
     } else if (connection->getConnectionType() == ConnectionTypeProxy) {
@@ -1177,6 +1184,13 @@ void ConnectionsManager::processServerResponse(TLObject *message, int64_t messag
             currentPingTimeLive = (diff + currentPingTimeLive) / 2;
             if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) received push ping", connection, instanceNum, datacenter->getDatacenterId(), connection->getConnectionType());
             sendingPushPing = false;
+            if (++pushPingSuccesses >= 3 && pushPingInterval < 60000 * 3) {
+                // keep-alives are getting through: relax the interval again, up to the default
+                int32_t longer = pushPingInterval * 5 / 4;
+                pushPingInterval = longer > 60000 * 3 ? 60000 * 3 : longer;
+                pushPingSuccesses = 0;
+                if (LOGS_ENABLED) DEBUG_D("push pings stable, interval now %d ms", pushPingInterval);
+            }
         } else {
             auto response = (TL_pong *) message;
             if (response->ping_id >= 2000000) {

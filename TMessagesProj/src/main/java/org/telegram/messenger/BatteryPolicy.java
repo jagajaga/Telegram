@@ -268,9 +268,9 @@ public class BatteryPolicy {
 
     /* ---- foreground efficiency ---- */
 
-    /** Cap the app's window at 60 Hz on high-refresh displays. Default on. */
+    /** Cap the app's window at 60 Hz on high-refresh displays. Off by default: the display runs as the phone is set. */
     public static boolean refreshRateCap() {
-        return prefs().getBoolean("refreshRateCap", true);
+        return prefs().getBoolean("refreshRateCap", false);
     }
 
     public static void setRefreshRateCap(boolean value) {

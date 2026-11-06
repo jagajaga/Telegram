@@ -10,11 +10,15 @@ import android.content.SharedPreferences;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.PowerManager;
+import android.view.Display;
+import android.view.Window;
+import android.view.WindowManager;
 import android.text.TextUtils;
 
 import androidx.core.app.NotificationManagerCompat;
 
 import org.telegram.tgnet.ConnectionsManager;
+import org.telegram.ui.LaunchActivity;
 
 import org.telegram.tgnet.TLRPC;
 
@@ -240,6 +244,7 @@ public class BatteryPolicy {
                     accounts.append(accounts.length() == 0 ? "" : ",").append("account").append(a).append(on ? ":on" : ":off");
                 }
             }
+            BatteryDiary.log("efficiency: animation flags " + LiteMode.getValue() + " (power saver level " + LiteMode.getPowerSaverLevel() + "), 60 Hz cap " + (refreshRateCap() ? "on" : "off") + ", display " + displayState() + ", stories on mobile " + (preloadStoriesOnMobile() ? "on" : "off"));
             BatteryDiary.log("calls check: notifications " + (notificationsEnabled ? "on" : "OFF") + ", incoming-call channel " + callsChannel + ", push token " + (tokenMissing ? "MISSING (" + SharedConfig.pushStringStatus + ")" : "ok") + ", background connection " + (backgroundConnection ? "on (" + accounts + ")" : "off"));
             // Switched on once, for the selected account only (every account with it on keeps its own
             // socket and its own 3-minute ping); other accounts can be switched on in their own
@@ -258,6 +263,97 @@ public class BatteryPolicy {
             }
         } catch (Throwable e) {
             FileLog.e(e);
+        }
+    }
+
+    /* ---- foreground efficiency ---- */
+
+    /** Cap the app's window at 60 Hz on high-refresh displays. Default on. */
+    public static boolean refreshRateCap() {
+        return prefs().getBoolean("refreshRateCap", true);
+    }
+
+    public static void setRefreshRateCap(boolean value) {
+        prefs().edit().putBoolean("refreshRateCap", value).apply();
+        if (LaunchActivity.instance != null) {
+            applyRefreshRateCap(LaunchActivity.instance.getWindow());
+        }
+    }
+
+    /** Prefetch stories on mobile data (upstream behaviour). Default off: Wi-Fi only. */
+    public static boolean preloadStoriesOnMobile() {
+        return prefs().getBoolean("storiesOnMobile", false);
+    }
+
+    public static void setPreloadStoriesOnMobile(boolean value) {
+        prefs().edit().putBoolean("storiesOnMobile", value).apply();
+    }
+
+    /**
+     * Once: Telegram's own Power Saving preset (no animated emoji and stickers, no autoplay of
+     * videos and GIFs, no chat blur or animated backgrounds, no call-screen animation) becomes
+     * the default. Settings → Power Saving changes it back.
+     */
+    public static void applyEfficientDefaults() {
+        if (prefs().getBoolean("efficientDefaultsApplied", false)) {
+            return;
+        }
+        prefs().edit().putBoolean("efficientDefaultsApplied", true).apply();
+        try {
+            LiteMode.setPowerSaverLevel(100);
+            BatteryDiary.log("efficiency: Power Saving set to always (Settings → Power Saving to change)");
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+    }
+
+    /**
+     * A chat app re-rendering at 120 Hz costs GPU and panel power for nothing a reader can see;
+     * ask the system for the 60 Hz mode of the current resolution (the system may still override).
+     */
+    public static void applyRefreshRateCap(Window window) {
+        if (window == null || Build.VERSION.SDK_INT < 23) {
+            return;
+        }
+        try {
+            WindowManager.LayoutParams lp = window.getAttributes();
+            if (!refreshRateCap()) {
+                lp.preferredDisplayModeId = 0;
+                lp.preferredRefreshRate = 0;
+                window.setAttributes(lp);
+                return;
+            }
+            Display display = window.getWindowManager().getDefaultDisplay();
+            Display.Mode current = display.getMode();
+            int bestId = 0;
+            float bestRate = 0;
+            for (Display.Mode mode : display.getSupportedModes()) {
+                if (mode.getPhysicalWidth() != current.getPhysicalWidth() || mode.getPhysicalHeight() != current.getPhysicalHeight()) {
+                    continue;
+                }
+                float rate = mode.getRefreshRate();
+                if (rate <= 61f && rate > bestRate) {
+                    bestRate = rate;
+                    bestId = mode.getModeId();
+                }
+            }
+            if (bestId != 0) {
+                lp.preferredDisplayModeId = bestId;
+            } else {
+                lp.preferredRefreshRate = 60f;
+            }
+            window.setAttributes(lp);
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+    }
+
+    private static String displayState() {
+        try {
+            Display display = ((WindowManager) ApplicationLoader.applicationContext.getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay();
+            return Math.round(display.getRefreshRate()) + " Hz";
+        } catch (Throwable e) {
+            return "?";
         }
     }
 

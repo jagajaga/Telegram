@@ -118,6 +118,8 @@ public class DataSettingsActivity extends BaseFragment {
     private int batteryForegroundOnlyRow;
     private int batteryChannelsLazyRow;
     private int batteryMutedRow;
+    private int batteryRefreshRateRow;
+    private int batteryStoriesMobileRow;
     private int batterySyncRow;
     private int batteryDiaryRow;
     private int batteryDiarySendRow;
@@ -182,6 +184,8 @@ public class DataSettingsActivity extends BaseFragment {
         batteryForegroundOnlyRow = rowCount++;
         batteryChannelsLazyRow = rowCount++;
         batteryMutedRow = rowCount++;
+        batteryRefreshRateRow = rowCount++;
+        batteryStoriesMobileRow = rowCount++;
         batterySyncRow = BatteryPolicy.pushAvailable() ? rowCount++ : -1;
         batteryDiaryRow = rowCount++;
         batteryDiarySendRow = rowCount++;
@@ -364,6 +368,16 @@ public class DataSettingsActivity extends BaseFragment {
                 BatteryPolicy.setPrefetchMutedMedia(!BatteryPolicy.prefetchMutedMedia());
                 if (view instanceof TextCheckCell) {
                     ((TextCheckCell) view).setChecked(!BatteryPolicy.prefetchMutedMedia());
+                }
+            } else if (position == batteryRefreshRateRow) {
+                BatteryPolicy.setRefreshRateCap(!BatteryPolicy.refreshRateCap());
+                if (view instanceof TextCheckCell) {
+                    ((TextCheckCell) view).setChecked(BatteryPolicy.refreshRateCap());
+                }
+            } else if (position == batteryStoriesMobileRow) {
+                BatteryPolicy.setPreloadStoriesOnMobile(!BatteryPolicy.preloadStoriesOnMobile());
+                if (view instanceof TextCheckCell) {
+                    ((TextCheckCell) view).setChecked(BatteryPolicy.preloadStoriesOnMobile());
                 }
             } else if (position == batteryDiaryRow) {
                 BatteryDiary.share(getParentActivity());
@@ -845,6 +859,10 @@ public class DataSettingsActivity extends BaseFragment {
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryChannelsLazy), !BatteryPolicy.prefetchChannelMedia(), true);
                     } else if (position == batteryMutedRow) {
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryMutedLazy), !BatteryPolicy.prefetchMutedMedia(), true);
+                    } else if (position == batteryRefreshRateRow) {
+                        checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryRefreshRateCap), BatteryPolicy.refreshRateCap(), true);
+                    } else if (position == batteryStoriesMobileRow) {
+                        checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryStoriesMobile), BatteryPolicy.preloadStoriesOnMobile(), true);
                     } else if (position == batteryDiarySendRow) {
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryDiaryAutoSend), BatteryDiary.autoSendEnabled(), false);
                     }
@@ -1017,7 +1035,7 @@ public class DataSettingsActivity extends BaseFragment {
                 return 0;
             } else if (position == mediaDownloadSectionRow || position == streamSectionRow || position == callsSectionRow || position == usageSectionRow || position == proxySectionRow || position == autoplayHeaderRow || position == saveToGallerySectionRow || position == batterySectionRow) {
                 return 2;
-            } else if (position == enableCacheStreamRow || position == enableStreamRow || position == enableAllStreamRow || position == enableMkvRow || position == autoplayGifsRow || position == autoplayVideoRow || position == batteryForegroundOnlyRow || position == batteryChannelsLazyRow || position == batteryMutedRow || position == batteryDiarySendRow) {
+            } else if (position == enableCacheStreamRow || position == enableStreamRow || position == enableAllStreamRow || position == enableMkvRow || position == autoplayGifsRow || position == autoplayVideoRow || position == batteryForegroundOnlyRow || position == batteryChannelsLazyRow || position == batteryMutedRow || position == batteryRefreshRateRow || position == batteryStoriesMobileRow || position == batteryDiarySendRow) {
                 return 3;
             } else if (position == enableAllStreamInfoRow || position == batteryInfoRow) {
                 return 4;

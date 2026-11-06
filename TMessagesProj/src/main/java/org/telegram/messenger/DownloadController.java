@@ -1758,6 +1758,9 @@ public class DownloadController extends BaseController implements NotificationCe
         }
         Preset preset;
         int networkType = ApplicationLoader.getAutodownloadNetworkType();
+        if (networkType != StatsController.TYPE_WIFI && !BatteryPolicy.preloadStoriesOnMobile()) {
+            return false;
+        }
         if (networkType == StatsController.TYPE_WIFI) {
             if (!wifiPreset.enabled) {
                 return false;

@@ -34,6 +34,7 @@ import androidx.annotation.RawRes;
 import androidx.annotation.UiThread;
 import androidx.annotation.WorkerThread;
 
+import org.telegram.messenger.BatteryPolicy;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildConfig;
 import org.telegram.messenger.DispatchQueue;
@@ -519,7 +520,7 @@ public class RLottieDrawable extends BitmapDrawable implements Animatable, Bitma
     public RLottieDrawable(File file, String json, int w, int h, BitmapsCache.CacheOptions options, boolean limitFps, int[] colorReplacement, int fitzModifier, boolean isSingleChannel) {
         width = w;
         height = h;
-        shouldLimitFps = limitFps;
+        shouldLimitFps = limitFps || BatteryPolicy.efficientAnimations();
         this.isSingleChannel = isSingleChannel;
         this.precache = options != null;
         this.fallbackCache = json == null && options != null && options.fallback;
@@ -544,7 +545,7 @@ public class RLottieDrawable extends BitmapDrawable implements Animatable, Bitma
             if (shouldLimitFps && metaData[1] < 60) {
                 shouldLimitFps = false;
             }
-            bitmapsCache = new BitmapsCache(file, this, options, w, h, !limitFps, fitzModifier);
+            bitmapsCache = new BitmapsCache(file, this, options, w, h, !shouldLimitFps, fitzModifier);
         } else {
             nativePtr = RLottieNative.createFromFile(
                 file.getAbsolutePath(),

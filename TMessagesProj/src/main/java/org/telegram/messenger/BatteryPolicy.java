@@ -244,7 +244,7 @@ public class BatteryPolicy {
                     accounts.append(accounts.length() == 0 ? "" : ",").append("account").append(a).append(on ? ":on" : ":off");
                 }
             }
-            BatteryDiary.log("efficiency: animation flags " + LiteMode.getValue() + " (power saver level " + LiteMode.getPowerSaverLevel() + "), 60 Hz cap " + (refreshRateCap() ? "on" : "off") + ", display " + displayState() + ", stories on mobile " + (preloadStoriesOnMobile() ? "on" : "off"));
+            BatteryDiary.log("efficiency: animation flags " + LiteMode.getValue() + " (power saver level " + LiteMode.getPowerSaverLevel() + "), 60 Hz cap " + (refreshRateCap() ? "on" : "off") + ", animations at 30 fps " + (efficientAnimations() ? "on" : "off") + ", display " + displayState() + ", stories on mobile " + (preloadStoriesOnMobile() ? "on" : "off"));
             BatteryDiary.log("calls check: notifications " + (notificationsEnabled ? "on" : "OFF") + ", incoming-call channel " + callsChannel + ", push token " + (tokenMissing ? "MISSING (" + SharedConfig.pushStringStatus + ")" : "ok") + ", background connection " + (backgroundConnection ? "on (" + accounts + ")" : "off"));
             // Switched on once, for the selected account only (every account with it on keeps its own
             // socket and its own 3-minute ping); other accounts can be switched on in their own
@@ -289,19 +289,29 @@ public class BatteryPolicy {
         prefs().edit().putBoolean("storiesOnMobile", value).apply();
     }
 
+    /** Animated stickers and emoji at half their frame rate (30 instead of 60 fps): same motion, half the CPU. Default on. */
+    public static boolean efficientAnimations() {
+        return prefs().getBoolean("efficientAnimations", true);
+    }
+
+    public static void setEfficientAnimations(boolean value) {
+        prefs().edit().putBoolean("efficientAnimations", value).apply();
+    }
+
     /**
-     * Once: Telegram's own Power Saving preset (no animated emoji and stickers, no autoplay of
-     * videos and GIFs, no chat blur or animated backgrounds, no call-screen animation) becomes
-     * the default. Settings → Power Saving changes it back.
+     * fork.20 switched Telegram's Power Saving preset to "always" by default; the user prefers
+     * their settings left alone, so a phone that got that default is put back once.
      */
     public static void applyEfficientDefaults() {
-        if (prefs().getBoolean("efficientDefaultsApplied", false)) {
+        if (!prefs().getBoolean("efficientDefaultsApplied", false) || prefs().getBoolean("efficientDefaultsReverted", false)) {
             return;
         }
-        prefs().edit().putBoolean("efficientDefaultsApplied", true).apply();
+        prefs().edit().putBoolean("efficientDefaultsReverted", true).apply();
         try {
-            LiteMode.setPowerSaverLevel(100);
-            BatteryDiary.log("efficiency: Power Saving set to always (Settings → Power Saving to change)");
+            if (LiteMode.getPowerSaverLevel() == 100) {
+                LiteMode.setPowerSaverLevel(10);
+                BatteryDiary.log("efficiency: Power Saving put back to Telegram's default (only below 10%)");
+            }
         } catch (Throwable e) {
             FileLog.e(e);
         }

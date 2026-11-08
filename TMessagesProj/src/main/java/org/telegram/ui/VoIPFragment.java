@@ -65,6 +65,7 @@ import androidx.core.graphics.ColorUtils;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
+import org.telegram.messenger.BatteryDiary;
 import org.telegram.messenger.BatteryPolicy;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AnimationNotificationsLocker;
@@ -1781,6 +1782,37 @@ public class VoIPFragment implements
         }
     }
 
+    private Boolean screenReleased;
+
+    /**
+     * The call window asked the display to stay on for the whole call. That is right while ringing,
+     * connecting and in video, but in an established voice call on a headset (the proximity sensor
+     * never fires) it kept a 120 Hz panel lit for the entire call. Release it there, so the phone's
+     * own screen timeout applies; touching the screen wakes it as usual.
+     */
+    private void updateKeepScreenOn(boolean voiceEstablished) {
+        boolean release = voiceEstablished && BatteryPolicy.callScreenTimeout();
+        if (windowView == null || (screenReleased != null && screenReleased == release)) {
+            return;
+        }
+        try {
+            WindowManager.LayoutParams lp = (WindowManager.LayoutParams) windowView.getLayoutParams();
+            if (lp == null) {
+                return;
+            }
+            if (release) {
+                lp.flags &= ~WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON;
+            } else {
+                lp.flags |= WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON;
+            }
+            ((WindowManager) windowView.getContext().getSystemService(Context.WINDOW_SERVICE)).updateViewLayout(windowView, lp);
+            screenReleased = release;
+            BatteryDiary.log("call: screen " + (release ? "may time out (voice call)" : "kept on"));
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+    }
+
     private void updateViewState() {
         if (isFinished || switchingToPip) {
             return;
@@ -2053,6 +2085,7 @@ public class VoIPFragment implements
         statusLayoutOffset = callingUserPhotoViewMini.getTag() == null ? 0 : AndroidUtilities.dp(135) + AndroidUtilities.dp(12);
         showAcceptDeclineView(showAcceptDeclineView, animated);
         windowView.setLockOnScreen(lockOnScreen || deviceIsLocked);
+        updateKeepScreenOn(currentState == VoIPService.STATE_ESTABLISHED && !currentUserIsVideo && !callingUserIsVideo);
         canHideUI = (currentState == VoIPService.STATE_ESTABLISHED) && (currentUserIsVideo || callingUserIsVideo);
         if (!canHideUI && !uiVisible) {
             showUi(true);

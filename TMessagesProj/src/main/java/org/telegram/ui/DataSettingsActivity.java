@@ -121,6 +121,7 @@ public class DataSettingsActivity extends BaseFragment {
     private int batteryRefreshRateRow;
     private int batteryAnimationsRow;
     private int batteryCallScreenRow;
+    private int batteryCallTimeoutRow;
     private int batteryStoriesMobileRow;
     private int batterySyncRow;
     private int batteryDiaryRow;
@@ -189,6 +190,7 @@ public class DataSettingsActivity extends BaseFragment {
         batteryRefreshRateRow = rowCount++;
         batteryAnimationsRow = rowCount++;
         batteryCallScreenRow = rowCount++;
+        batteryCallTimeoutRow = rowCount++;
         batteryStoriesMobileRow = rowCount++;
         batterySyncRow = BatteryPolicy.pushAvailable() ? rowCount++ : -1;
         batteryDiaryRow = rowCount++;
@@ -387,6 +389,11 @@ public class DataSettingsActivity extends BaseFragment {
                 BatteryPolicy.setCallScreen60Hz(!BatteryPolicy.callScreen60Hz());
                 if (view instanceof TextCheckCell) {
                     ((TextCheckCell) view).setChecked(BatteryPolicy.callScreen60Hz());
+                }
+            } else if (position == batteryCallTimeoutRow) {
+                BatteryPolicy.setCallScreenTimeout(!BatteryPolicy.callScreenTimeout());
+                if (view instanceof TextCheckCell) {
+                    ((TextCheckCell) view).setChecked(BatteryPolicy.callScreenTimeout());
                 }
             } else if (position == batteryStoriesMobileRow) {
                 BatteryPolicy.setPreloadStoriesOnMobile(!BatteryPolicy.preloadStoriesOnMobile());
@@ -879,6 +886,8 @@ public class DataSettingsActivity extends BaseFragment {
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryAnimations30), BatteryPolicy.efficientAnimations(), true);
                     } else if (position == batteryCallScreenRow) {
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryCallScreen60), BatteryPolicy.callScreen60Hz(), true);
+                    } else if (position == batteryCallTimeoutRow) {
+                        checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryCallTimeout), BatteryPolicy.callScreenTimeout(), true);
                     } else if (position == batteryStoriesMobileRow) {
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.BatteryStoriesMobile), BatteryPolicy.preloadStoriesOnMobile(), true);
                     } else if (position == batteryDiarySendRow) {
@@ -1053,7 +1062,7 @@ public class DataSettingsActivity extends BaseFragment {
                 return 0;
             } else if (position == mediaDownloadSectionRow || position == streamSectionRow || position == callsSectionRow || position == usageSectionRow || position == proxySectionRow || position == autoplayHeaderRow || position == saveToGallerySectionRow || position == batterySectionRow) {
                 return 2;
-            } else if (position == enableCacheStreamRow || position == enableStreamRow || position == enableAllStreamRow || position == enableMkvRow || position == autoplayGifsRow || position == autoplayVideoRow || position == batteryForegroundOnlyRow || position == batteryChannelsLazyRow || position == batteryMutedRow || position == batteryRefreshRateRow || position == batteryAnimationsRow || position == batteryCallScreenRow || position == batteryStoriesMobileRow || position == batteryDiarySendRow) {
+            } else if (position == enableCacheStreamRow || position == enableStreamRow || position == enableAllStreamRow || position == enableMkvRow || position == autoplayGifsRow || position == autoplayVideoRow || position == batteryForegroundOnlyRow || position == batteryChannelsLazyRow || position == batteryMutedRow || position == batteryRefreshRateRow || position == batteryAnimationsRow || position == batteryCallScreenRow || position == batteryCallTimeoutRow || position == batteryStoriesMobileRow || position == batteryDiarySendRow) {
                 return 3;
             } else if (position == enableAllStreamInfoRow || position == batteryInfoRow) {
                 return 4;

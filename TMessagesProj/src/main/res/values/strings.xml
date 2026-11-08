@@ -11645,6 +11645,7 @@
     <string name="BatteryRefreshRateCap">Limit refresh rate to 60 Hz</string>
     <string name="BatteryAnimations30">Animated stickers and emoji at 30 fps</string>
     <string name="BatteryCallScreen60">Call screen at 60 Hz</string>
+    <string name="BatteryCallTimeout">Screen turns off during voice calls</string>
     <string name="BatteryStoriesMobile">Preload stories on mobile data</string>
     <string name="BatteryDiary">Battery diary</string>
     <string name="BatteryDiaryAutoSend">Send the diary to Saved Messages daily</string>

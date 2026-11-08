@@ -280,6 +280,15 @@ public class BatteryPolicy {
         }
     }
 
+    /** In an established voice call the screen follows the phone's timeout instead of staying lit. Default on. */
+    public static boolean callScreenTimeout() {
+        return prefs().getBoolean("callScreenTimeout", true);
+    }
+
+    public static void setCallScreenTimeout(boolean value) {
+        prefs().edit().putBoolean("callScreenTimeout", value).apply();
+    }
+
     /** The call screen's own window at 60 Hz: slow gradients and a timer gain nothing from 120. Default on. */
     public static boolean callScreen60Hz() {
         return prefs().getBoolean("callScreen60Hz", true);

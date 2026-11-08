@@ -12,6 +12,7 @@ import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.view.View;
 
+import org.telegram.messenger.BatteryDiary;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LiteMode;
 import org.telegram.tgnet.TLRPC;
@@ -136,6 +137,7 @@ public class VoIpCoverView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
+        BatteryDiary.callDraw(BatteryDiary.DRAW_COVER);
         if (!allowAnimations) {
             return;
         }

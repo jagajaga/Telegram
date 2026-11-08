@@ -24,6 +24,7 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 
+import org.telegram.messenger.BatteryDiary;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.LocaleController;
@@ -280,6 +281,7 @@ public class VoIPTextureView extends FrameLayout {
 
     @Override
     protected void dispatchDraw(Canvas canvas) {
+        BatteryDiary.callDraw(BatteryDiary.DRAW_VIDEO);
         super.dispatchDraw(canvas);
 
         if (AndroidUtilities.makingGlobalBlurBitmap) {

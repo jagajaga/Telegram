@@ -550,6 +550,7 @@ public class VoIPFragment implements
     }
 
     private void destroy() {
+        stopDrawStats();
         if (VoIPService.getSharedInstance() != null) {
             VoIPService.getSharedInstance().unregisterStateListener(this);
         }
@@ -1772,6 +1773,38 @@ public class VoIPFragment implements
     }
 
     private Boolean screenReleased;
+    private android.view.ViewTreeObserver.OnDrawListener drawCounter;
+    private final Runnable drawStatsRunnable = new Runnable() {
+        @Override
+        public void run() {
+            VoIPService service = VoIPService.getSharedInstance();
+            boolean video = service != null && (service.getVideoState(false) == Instance.VIDEO_STATE_ACTIVE || service.getRemoteVideoState() == Instance.VIDEO_STATE_ACTIVE);
+            BatteryDiary.flushCallDraws("state " + currentState + (video ? ", video" : ", voice") + ", ui " + (uiVisible ? "shown" : "hidden"));
+            AndroidUtilities.runOnUIThread(this, 30000);
+        }
+    };
+
+    private void startDrawStats() {
+        if (drawCounter != null || windowView == null) {
+            return;
+        }
+        drawCounter = () -> BatteryDiary.callDraw(BatteryDiary.DRAW_WINDOW);
+        windowView.getViewTreeObserver().addOnDrawListener(drawCounter);
+        BatteryDiary.flushCallDraws("start");
+        AndroidUtilities.runOnUIThread(drawStatsRunnable, 30000);
+    }
+
+    private void stopDrawStats() {
+        AndroidUtilities.cancelRunOnUIThread(drawStatsRunnable);
+        if (drawCounter != null && windowView != null) {
+            try {
+                windowView.getViewTreeObserver().removeOnDrawListener(drawCounter);
+            } catch (Throwable ignore) {
+            }
+            BatteryDiary.flushCallDraws("end");
+        }
+        drawCounter = null;
+    }
 
     /**
      * The call window asked the display to stay on for the whole call. That is right while ringing,
@@ -2075,6 +2108,7 @@ public class VoIPFragment implements
         showAcceptDeclineView(showAcceptDeclineView, animated);
         windowView.setLockOnScreen(lockOnScreen || deviceIsLocked);
         updateKeepScreenOn(currentState == VoIPService.STATE_ESTABLISHED && !currentUserIsVideo && !callingUserIsVideo);
+        startDrawStats();
         canHideUI = (currentState == VoIPService.STATE_ESTABLISHED) && (currentUserIsVideo || callingUserIsVideo);
         if (!canHideUI && !uiVisible) {
             showUi(true);

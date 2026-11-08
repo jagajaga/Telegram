@@ -23,6 +23,7 @@ import android.widget.FrameLayout;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import org.telegram.messenger.BatteryDiary;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LiteMode;
 import org.telegram.ui.Components.MotionBackgroundDrawable;
@@ -346,6 +347,7 @@ public class VoIpGradientLayout extends FrameLayout {
 
     @Override
     protected void onDraw(Canvas canvas) {
+        BatteryDiary.callDraw(BatteryDiary.DRAW_GRADIENT);
         if (lockDrawing) {
             return;
         }

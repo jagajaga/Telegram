@@ -11,6 +11,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
 
+import org.telegram.messenger.BatteryDiary;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.LiteMode;
@@ -121,6 +122,7 @@ public class ImageWithWavesView extends FrameLayout {
 
     @Override
     protected void onDraw(Canvas canvas) {
+        BatteryDiary.callDraw(BatteryDiary.DRAW_WAVES);
         if(allowAnimations) {
             avatarWavesDrawable.update();
             int cx = getWidth() / 2;

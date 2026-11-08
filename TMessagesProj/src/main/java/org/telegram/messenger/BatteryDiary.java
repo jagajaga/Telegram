@@ -175,6 +175,33 @@ public class BatteryDiary {
         log("connection account" + account + " " + connectionStateName(state));
     }
 
+    /* ---- call screen draw counters: which element keeps redrawing during a call ---- */
+
+    public static final int DRAW_WINDOW = 0, DRAW_GRADIENT = 1, DRAW_WAVES = 2, DRAW_COVER = 3, DRAW_STATUS = 4, DRAW_VIDEO = 5;
+    private static final String[] DRAW_NAMES = {"window", "gradient", "avatar waves", "cover/emoji", "status line", "video"};
+    private static final int[] callDraws = new int[DRAW_NAMES.length];
+    private static long callDrawsSince;
+
+    /** UI thread. */
+    public static void callDraw(int what) {
+        callDraws[what]++;
+    }
+
+    /** UI thread; logs draws per second since the last call and resets. */
+    public static void flushCallDraws(String context) {
+        long now = SystemClock.elapsedRealtime();
+        if (callDrawsSince != 0) {
+            float secs = Math.max(1, (now - callDrawsSince) / 1000f);
+            StringBuilder sb = new StringBuilder("call screen draws/s (" + context + "):");
+            for (int i = 0; i < DRAW_NAMES.length; i++) {
+                sb.append(' ').append(DRAW_NAMES[i]).append(' ').append(String.format(Locale.US, "%.1f", callDraws[i] / secs)).append(i < DRAW_NAMES.length - 1 ? "," : "");
+            }
+            log(sb.toString());
+        }
+        java.util.Arrays.fill(callDraws, 0);
+        callDrawsSince = now;
+    }
+
     public static void log(String event) {
         final String line = FORMAT.format(new Date()) + " | " + (ApplicationLoader.mainInterfacePaused ? "bg" : "fg") + " | " + deviceState() + " | " + event + "\n";
         queue.postRunnable(() -> append(line));

@@ -22,6 +22,7 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 
+import org.telegram.messenger.BatteryDiary;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
@@ -68,6 +69,7 @@ public class VoIPStatusTextView extends FrameLayout {
 
             @Override
             protected void onDraw(Canvas canvas) {
+                BatteryDiary.callDraw(BatteryDiary.DRAW_STATUS);
                 bgRect.set(0, 0, getWidth(), getHeight());
                 float x = getX() + ((View) getParent()).getX() + VoIPStatusTextView.this.getX() + ((View) VoIPStatusTextView.this.getParent()).getX();
                 float y = getY() + ((View) getParent()).getY() + VoIPStatusTextView.this.getY() + ((View) VoIPStatusTextView.this.getParent()).getY();

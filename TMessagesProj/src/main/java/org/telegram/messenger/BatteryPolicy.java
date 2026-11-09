@@ -280,6 +280,11 @@ public class BatteryPolicy {
         }
     }
 
+    /** Pause the app behind the call screen while the call screen is shown and idle. Default on. */
+    public static boolean pauseUnderCall() {
+        return prefs().getBoolean("pauseUnderCall", true);
+    }
+
     /** In an established voice call the screen follows the phone's timeout instead of staying lit. Default on. */
     public static boolean callScreenTimeout() {
         return prefs().getBoolean("callScreenTimeout", true);

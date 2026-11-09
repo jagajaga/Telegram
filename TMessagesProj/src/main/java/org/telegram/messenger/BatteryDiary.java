@@ -187,6 +187,50 @@ public class BatteryDiary {
         callDraws[what]++;
     }
 
+    private static java.util.HashMap<String, Long> lastThreadTicks;
+
+    /** CPU per thread name since the previous sample, top entries, from /proc/self/task. */
+    private static String threadCpu(float secs) {
+        java.util.HashMap<String, Long> now = new java.util.HashMap<>();
+        try {
+            File[] tasks = new File("/proc/self/task").listFiles();
+            if (tasks == null) {
+                return "";
+            }
+            for (File task : tasks) {
+                try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(new File(task, "stat")))) {
+                    String stat = r.readLine();
+                    int open = stat.indexOf('('), close = stat.lastIndexOf(')');
+                    String name = stat.substring(open + 1, close).replaceAll("[0-9]+$", "#").replaceAll("-[0-9]+$", "-#");
+                    String[] f = stat.substring(close + 2).split(" ");
+                    long ticks = Long.parseLong(f[11]) + Long.parseLong(f[12]);
+                    now.merge(name, ticks, Long::sum);
+                } catch (Throwable ignore) {
+                }
+            }
+        } catch (Throwable ignore) {
+        }
+        String out = "";
+        if (lastThreadTicks != null) {
+            java.util.ArrayList<java.util.Map.Entry<String, Long>> deltas = new java.util.ArrayList<>();
+            for (java.util.Map.Entry<String, Long> e : now.entrySet()) {
+                long d = e.getValue() - lastThreadTicks.getOrDefault(e.getKey(), 0L);
+                if (d > 0) {
+                    deltas.add(new java.util.AbstractMap.SimpleEntry<>(e.getKey(), d));
+                }
+            }
+            deltas.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
+            StringBuilder sb = new StringBuilder(" | threads, % of a core:");
+            for (int i = 0; i < Math.min(8, deltas.size()); i++) {
+                // clock ticks are 100 per second on Android
+                sb.append(' ').append(deltas.get(i).getKey()).append(' ').append(Math.round(deltas.get(i).getValue() / secs)).append(i < Math.min(8, deltas.size()) - 1 ? "," : "");
+            }
+            out = sb.toString();
+        }
+        lastThreadTicks = now;
+        return out;
+    }
+
     /** UI thread; logs draws per second since the last call and resets. */
     public static void flushCallDraws(String context) {
         long now = SystemClock.elapsedRealtime();
@@ -196,7 +240,10 @@ public class BatteryDiary {
             for (int i = 0; i < DRAW_NAMES.length; i++) {
                 sb.append(' ').append(DRAW_NAMES[i]).append(' ').append(String.format(Locale.US, "%.1f", callDraws[i] / secs)).append(i < DRAW_NAMES.length - 1 ? "," : "");
             }
+            sb.append(threadCpu(secs));
             log(sb.toString());
+        } else {
+            threadCpu(1);
         }
         java.util.Arrays.fill(callDraws, 0);
         callDrawsSince = now;

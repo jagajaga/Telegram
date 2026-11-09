@@ -283,8 +283,53 @@ public class VoIPFragment implements
         if (currentState == VoIPService.STATE_ESTABLISHED) {
             callingUserPhotoViewMini.setMute(true, false);
             gradientLayout.pause();
+            suspendUnderlying();
         }
     };
+
+    /* ---- the app underneath the call screen ---- */
+
+    private static final int UNDER_CALL_HEAVY_FLAG = 1 << 22;
+    private boolean underlyingSuspended;
+
+    /**
+     * The call window is translucent, so the app behind it — whatever chat or list was open, with
+     * its animated stickers, emoji, GIFs and video previews — kept rendering for the whole call,
+     * unseen: with the call screen idle at 4 frames/s, a voice call still cost ~40 % of a core in
+     * the foreground against ~7 % with the app in the background. While the call screen is fully
+     * shown and idle, stop heavy animations underneath and stop drawing the app's content view
+     * (the call screen's own background is opaque black). Undone before any transition out.
+     */
+    private void suspendUnderlying() {
+        if (underlyingSuspended || switchingToPip || isFinished || !BatteryPolicy.pauseUnderCall()) {
+            return;
+        }
+        underlyingSuspended = true;
+        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.stopAllHeavyOperations, UNDER_CALL_HEAVY_FLAG);
+        if (activity instanceof LaunchActivity && ((LaunchActivity) activity).getFrameLayout() != null) {
+            ((LaunchActivity) activity).getFrameLayout().setVisibility(View.INVISIBLE);
+        }
+        BatteryDiary.log("call: app behind the call screen paused");
+    }
+
+    public void restoreUnderlying() {
+        if (!underlyingSuspended) {
+            return;
+        }
+        underlyingSuspended = false;
+        if (activity instanceof LaunchActivity && ((LaunchActivity) activity).getFrameLayout() != null) {
+            ((LaunchActivity) activity).getFrameLayout().setVisibility(View.VISIBLE);
+        }
+        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.startAllHeavyOperations, UNDER_CALL_HEAVY_FLAG);
+        BatteryDiary.log("call: app behind the call screen resumed");
+    }
+
+    /** Called by the call window when it starts closing. */
+    public static void onWindowClosing() {
+        if (instance != null) {
+            instance.restoreUnderlying();
+        }
+    }
     private boolean lockOnScreen;
     private boolean screenWasWakeup;
     private boolean isVideoCall;
@@ -551,6 +596,7 @@ public class VoIPFragment implements
 
     private void destroy() {
         stopDrawStats();
+        restoreUnderlying();
         if (VoIPService.getSharedInstance() != null) {
             VoIPService.getSharedInstance().unregisterStateListener(this);
         }
@@ -1486,6 +1532,7 @@ public class VoIPFragment implements
         callingUserMiniFloatingLayout.animate().alpha(0).setDuration(350).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
         notificationsLayout.animate().alpha(0).setDuration(350).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
 
+        restoreUnderlying();
         VoIPPiPView.switchingToPip = true;
         switchingToPip = true;
         Animator animator = createPiPTransition(false);

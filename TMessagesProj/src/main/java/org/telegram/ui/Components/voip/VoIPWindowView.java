@@ -120,6 +120,7 @@ public class VoIPWindowView extends FrameLayout {
     }
 
     public void finish() {
+        org.telegram.ui.VoIPFragment.onWindowClosing();
         finish(330);
     }
 
@@ -208,6 +209,7 @@ public class VoIPWindowView extends FrameLayout {
     }
 
     public void finishImmediate() {
+        org.telegram.ui.VoIPFragment.onWindowClosing();
         if (getParent() != null) {
             AndroidUtilities.unlockOrientation(activity);
             WindowManager wm = (WindowManager) activity.getSystemService(Context.WINDOW_SERVICE);

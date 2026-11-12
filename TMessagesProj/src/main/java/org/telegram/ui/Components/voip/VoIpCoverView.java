@@ -212,6 +212,14 @@ public class VoIpCoverView extends View {
     }
 
     public void setState(boolean isPaused) {
+        if (this.isPaused != isPaused && allowAnimations) {
+            for (VoipCoverEmoji e : voipCoverEmojiLeft) {
+                e.setPaused(isPaused);
+            }
+            for (VoipCoverEmoji e : voipCoverEmojiRight) {
+                e.setPaused(isPaused);
+            }
+        }
         this.isPaused = isPaused;
         invalidate();
     }

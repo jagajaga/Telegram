@@ -152,6 +152,18 @@ public class VoipCoverEmoji {
         canvas.restore();
     }
 
+    /** The cover is not drawn (video mode): stop the endless drift, which otherwise forces a redraw every frame. */
+    public void setPaused(boolean paused) {
+        if (positionAnimator == null) return;
+        if (paused) {
+            if (positionAnimator.isRunning()) positionAnimator.pause();
+        } else if (positionAnimator.isPaused()) {
+            positionAnimator.resume();
+        } else if (!positionAnimator.isRunning() && emoji != null) {
+            positionAnimator.start();
+        }
+    }
+
     public void onAttachedToWindow() {
         if (emoji == null) return;
         emoji.attach();

@@ -46,6 +46,26 @@ public class FileRefController extends BaseController {
 
     private HashMap<String, ArrayList<Requester>> locationRequester = new HashMap<>();
     private HashMap<String, ArrayList<Requester>> parentRequester = new HashMap<>();
+
+    /**
+     * Responses to getScheduledMessages / getQuickReplyMessages. Their messages have ids from a
+     * separate sequence, so they must never be written over the chat's history: upstream cached
+     * them with replaceMessageIfExists, which matches messages_v2 and media_v4 on (id, dialog)
+     * alone and overwrote the published post that happened to share the id — its text, its photo
+     * and its media-index entry. Channels posting through scheduled publishing slowly had their
+     * history corrupted; the photo viewer opened the wrong photo.
+     */
+    private final java.util.Set<TLObject> notHistoryResponses = java.util.Collections.synchronizedSet(java.util.Collections.newSetFromMap(new java.util.WeakHashMap<>()));
+
+    private void markNotHistory(TLObject response) {
+        if (response != null) {
+            notHistoryResponses.add(response);
+        }
+    }
+
+    private boolean isHistory(TLObject response) {
+        return !notHistoryResponses.contains(response);
+    }
     private HashMap<String, CachedResult> responseCache = new HashMap<>();
     private HashMap<TLObject, Object[]> multiMediaCache = new HashMap<>();
 
@@ -559,13 +579,19 @@ public class FileRefController extends BaseController {
                 TLRPC.TL_messages_getScheduledMessages req = new TLRPC.TL_messages_getScheduledMessages();
                 req.peer = getMessagesController().getInputPeer(messageObject.getDialogId());
                 req.id.add(messageObject.getRealId());
-                getConnectionsManager().sendRequest(req, (response, error) -> onRequestComplete(locationKey, parentKey, response, error, true, false));
+                getConnectionsManager().sendRequest(req, (response, error) -> {
+                    markNotHistory(response);
+                    onRequestComplete(locationKey, parentKey, response, error, true, false);
+                });
             } else if (messageObject.isQuickReply()) {
                 TLRPC.TL_messages_getQuickReplyMessages req = new TLRPC.TL_messages_getQuickReplyMessages();
                 req.shortcut_id = messageObject.getQuickReplyId();
                 req.flags |= 1;
                 req.id.add(messageObject.getRealId());
-                getConnectionsManager().sendRequest(req, (response, error) -> onRequestComplete(locationKey, parentKey, response, error, true, false));
+                getConnectionsManager().sendRequest(req, (response, error) -> {
+                    markNotHistory(response);
+                    onRequestComplete(locationKey, parentKey, response, error, true, false);
+                });
             } else if (messageObject.messageOwner != null && messageObject.messageOwner.rich_message != null && richMessagePeer != null) {
                 TL_iv.getRichMessage req = new TL_iv.getRichMessage();
                 req.peer = richMessagePeer;
@@ -1168,13 +1194,13 @@ public class FileRefController extends BaseController {
                             result = getFileReference(message.action.photo, requester.location, needReplacement, locationReplacement);
                         }
                         if (result != null) {
-                            if (cache) {
+                            if (cache && isHistory(response)) {
                                 getMessagesStorage().replaceMessageIfExists(message, res.users, res.chats, false);
                             }
                             break;
                         }
                     }
-                    if (result == null) {
+                    if (result == null && isHistory(response)) {
                         getMessagesStorage().replaceMessageIfExists(res.messages.get(0), res.users, res.chats, true);
                         if (BuildVars.DEBUG_VERSION) {
                             FileLog.d("file ref not found in messages, replacing message");
@@ -1548,7 +1574,7 @@ public class FileRefController extends BaseController {
                         result = getFileReference(message.action.photo, location, needReplacement, locationReplacement);
                     }
                 }
-                if (result == null) {
+                if (result == null && isHistory(response)) {
                     getMessagesStorage().replaceMessageIfExists(res.messages.get(0), res.users, res.chats, true);
                     if (BuildVars.DEBUG_VERSION) {
                         FileLog.d("file ref not found in messages, replacing message");

@@ -300,15 +300,23 @@ public class VoIPFragment implements
      * shown and idle, stop heavy animations underneath and stop drawing the app's content view
      * (the call screen's own background is opaque black). Undone before any transition out.
      */
+    private View suspendedView;
+
+    private boolean callScreenCovering() {
+        return windowView != null && windowView.isAttachedToWindow() && windowView.getVisibility() == View.VISIBLE && windowView.getWindowVisibility() == View.VISIBLE;
+    }
+
     private void suspendUnderlying() {
-        if (underlyingSuspended || switchingToPip || isFinished || !BatteryPolicy.pauseUnderCall()) {
+        if (underlyingSuspended || switchingToPip || isFinished || !BatteryPolicy.pauseUnderCall() || !callScreenCovering()) {
+            return;
+        }
+        if (!(activity instanceof LaunchActivity) || ((LaunchActivity) activity).getFrameLayout() == null) {
             return;
         }
         underlyingSuspended = true;
+        suspendedView = ((LaunchActivity) activity).getFrameLayout();
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.stopAllHeavyOperations, UNDER_CALL_HEAVY_FLAG);
-        if (activity instanceof LaunchActivity && ((LaunchActivity) activity).getFrameLayout() != null) {
-            ((LaunchActivity) activity).getFrameLayout().setVisibility(View.INVISIBLE);
-        }
+        suspendedView.setVisibility(View.INVISIBLE);
         BatteryDiary.log("call: app behind the call screen paused");
     }
 
@@ -317,11 +325,33 @@ public class VoIPFragment implements
             return;
         }
         underlyingSuspended = false;
-        if (activity instanceof LaunchActivity && ((LaunchActivity) activity).getFrameLayout() != null) {
-            ((LaunchActivity) activity).getFrameLayout().setVisibility(View.VISIBLE);
+        if (suspendedView != null) {
+            suspendedView.setVisibility(View.VISIBLE);
+            suspendedView = null;
         }
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.startAllHeavyOperations, UNDER_CALL_HEAVY_FLAG);
         BatteryDiary.log("call: app behind the call screen resumed");
+    }
+
+    /**
+     * Whenever the app comes back to the front: its content may stay hidden only while this call
+     * screen is attached and covering it. Anything else — the call screen gone, detached, replaced,
+     * a recreated activity — shows the app again. A covering call screen re-pauses it 10 s later.
+     */
+    public static void ensureAppVisible(LaunchActivity launchActivity) {
+        if (instance != null) {
+            instance.restoreUnderlying();
+        }
+        View content = launchActivity.getFrameLayout();
+        if (content != null && content.getVisibility() != View.VISIBLE) {
+            content.setVisibility(View.VISIBLE);
+            NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.startAllHeavyOperations, UNDER_CALL_HEAVY_FLAG);
+            BatteryDiary.log("call: app content was still hidden on return, shown again");
+        }
+        if (instance != null && instance.currentState == VoIPService.STATE_ESTABLISHED && instance.callScreenCovering()) {
+            AndroidUtilities.cancelRunOnUIThread(instance.stopAnimatingBgRunnable);
+            AndroidUtilities.runOnUIThread(instance.stopAnimatingBgRunnable, 10000);
+        }
     }
 
     /** Called by the call window when it starts closing. */

@@ -1,3 +1,34 @@
+## Unofficial fork: faster attachments, far less battery
+
+An unofficial fork of [Telegram for Android](https://github.com/DrKLO/Telegram), kept in step with the official repository. It is not affiliated with Telegram.
+
+**[Download the latest APK](https://github.com/jagajaga/Telegram/releases/latest)** (arm64). It installs next to the official app and updates itself from this repository's releases.
+
+### What is different
+
+**Photos in the attach menu appear instantly.** A photo you just took is in the grid the moment you open the attach sheet. The official app rescans the whole gallery after a 2-second delay; this fork merges new photos into the existing list in milliseconds and loads thumbnails from the system cache, in parallel.
+
+**Much less battery in the background.** Media is downloaded only while the app is open; channel and muted-chat media loads when you open the chat; stories are preloaded on Wi‑Fi only. The background connection adapts its keep-alive to the carrier. Measured on one phone: background CPU went from about an hour a day to two or three minutes.
+
+**Calls use a fraction of the CPU.**
+- The app no longer keeps rendering the chat hidden behind the call screen — this was most of a call's cost.
+- During a voice call on a headset the screen follows the normal timeout instead of staying lit for the whole call.
+- The call screen runs at 60 Hz; the rest of the app keeps the phone's refresh rate.
+
+Together: a voice call went from roughly 40–50 % of a CPU core to about 8 %.
+
+**Bluetooth headsets in calls.** Calls are routed to the headset on the first attempt, with retries and a fallback for classic headsets. In the official app the audio could stay on the earpiece with no way to switch.
+
+**Calls always ring.** Builds not signed by Telegram cannot receive Google push notifications, so the fork keeps Telegram's own background connection for calls and messages. If Android's system call integration refuses a call, the app falls back to ringing on its own instead of dropping it.
+
+**Maps without Google.** Vector maps (MapLibre with OpenStreetMap data), sharp at any zoom, with a real dark style.
+
+**Smaller things.** A Calls tab in place of Contacts; animated stickers and emoji at 30 fps (optional).
+
+All battery options are in **Settings → Data and Storage → Battery**.
+
+---
+
 ## Telegram messenger for Android
 
 [Telegram](https://telegram.org) is a messaging app with a focus on speed and security. It’s superfast, simple and free.

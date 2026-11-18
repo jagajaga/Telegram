@@ -178,6 +178,9 @@ public class WebRtcAudioTrack {
           byteBuffer.put(emptyBytes);
           byteBuffer.position(0);
         }
+        if (org.telegram.messenger.voip.CallRecorder.isRecording()) {
+          org.telegram.messenger.voip.CallRecorder.onSpeakerPcm(byteBuffer, sizeInBytes, sampleRate, audioTrack.getChannelCount());
+        }
         int bytesWritten = writeBytes(audioTrack, byteBuffer, sizeInBytes, blocking);
         if (bytesWritten != sizeInBytes) {
           Logging.e(TAG, "AudioTrack.write played invalid number of bytes: " + bytesWritten);

@@ -209,6 +209,7 @@ public class NotificationCenter {
     public static final int groupCallTypingsUpdated = totalEvents++;
     public static final int didEndCall = totalEvents++;
     public static final int closeInCallActivity = totalEvents++;
+    public static final int callRecordingChanged = totalEvents++;
     public static final int groupCallVisibilityChanged = totalEvents++;
     public static final int liveStoryUpdated = totalEvents++;
     public static final int liveStoryMessageUpdate = totalEvents++;

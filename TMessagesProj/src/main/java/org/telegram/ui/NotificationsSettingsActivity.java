@@ -41,6 +41,7 @@ import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.ContactsController;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.NotificationCenter;
@@ -136,6 +137,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
     private int callsVibrateRow;
     private int callsRingtoneRow;
     private int callsSystemIntegrationRow;
+    private int callsAutoRecordRow;
     private int eventsSection2Row;
     private int eventsSectionRow;
     @Keep
@@ -192,6 +194,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
         callsVibrateRow = rowCount++;
         callsRingtoneRow = rowCount++;
         callsSystemIntegrationRow = rowCount++;
+        callsAutoRecordRow = rowCount++;
         eventsSection2Row = rowCount++;
 
         badgeNumberSection = rowCount++;
@@ -585,6 +588,8 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                 } else {
                     presentFragment(new NotificationsCustomSettingsActivity(type, exceptions, autoExceptions));
                 }
+            } else if (position == callsAutoRecordRow) {
+                showAutoRecordDialog(position);
             } else if (position == callsRingtoneRow) {
                 try {
                     SharedPreferences preferences = MessagesController.getNotificationsSettings(currentAccount);
@@ -941,6 +946,39 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
         }
     }
 
+    /** Contacts whose calls are recorded automatically; tapping one removes it. */
+    private void showAutoRecordDialog(int position) {
+        if (getParentActivity() == null) {
+            return;
+        }
+        final java.util.ArrayList<Long> ids = new java.util.ArrayList<>();
+        final java.util.ArrayList<CharSequence> names = new java.util.ArrayList<>();
+        for (String id : org.telegram.messenger.voip.CallRecorder.autoUsers()) {
+            try {
+                long userId = Long.parseLong(id);
+                TLRPC.User user = getMessagesController().getUser(userId);
+                ids.add(userId);
+                names.add(user != null ? ContactsController.formatName(user.first_name, user.last_name) : id);
+            } catch (Exception ignore) {
+            }
+        }
+        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+        builder.setTitle(getString(R.string.CallRecordAutoSettings));
+        if (ids.isEmpty()) {
+            builder.setMessage(getString(R.string.CallRecordAutoHowTo));
+        } else {
+            builder.setItems(names.toArray(new CharSequence[0]), (dialog, which) -> {
+                org.telegram.messenger.voip.CallRecorder.setAuto(ids.get(which), false);
+                if (adapter != null) {
+                    adapter.notifyItemChanged(position);
+                }
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.voip_record_saved, LocaleController.formatString(R.string.CallRecordAutoOff, names.get(which))).show();
+            });
+        }
+        builder.setPositiveButton(getString(R.string.OK), null);
+        showDialog(builder.create());
+    }
+
     private class ListAdapter extends RecyclerListView.SelectionAdapter {
 
         private Context mContext;
@@ -1168,7 +1206,10 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                 case 5: {
                     TextSettingsCell textCell = (TextSettingsCell) holder.itemView;
                     SharedPreferences preferences = MessagesController.getNotificationsSettings(currentAccount);
-                    if (position == callsRingtoneRow) {
+                    if (position == callsAutoRecordRow) {
+                        int count = org.telegram.messenger.voip.CallRecorder.autoUsers().size();
+                        textCell.setTextAndValue(getString(R.string.CallRecordAutoSettings), count == 0 ? getString(R.string.CallRecordAutoNone) : LocaleController.formatPluralString("Users", count), false);
+                    } else if (position == callsRingtoneRow) {
                         String value = preferences.getString("CallsRingtone", getString("DefaultRingtone", R.string.DefaultRingtone));
                         if (value.equals("NoSound")) {
                             value = getString("NoSound", R.string.NoSound);

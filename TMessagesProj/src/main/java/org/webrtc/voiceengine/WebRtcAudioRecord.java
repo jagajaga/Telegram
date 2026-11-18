@@ -193,6 +193,9 @@ public class WebRtcAudioRecord {
               byteBuffer.putShort(a * 2, (short) mixed);
             }
           }
+          if (org.telegram.messenger.voip.CallRecorder.isRecording()) {
+            org.telegram.messenger.voip.CallRecorder.onMicPcm(byteBuffer, bytesRead, audioRecord.getSampleRate(), audioRecord.getChannelCount());
+          }
           // It's possible we've been shut down during the read, and stopRecording() tried and
           // failed to join this thread. To be a bit safer, try to avoid calling any native methods
           // in case they've been unregistered after stopRecording() returned.

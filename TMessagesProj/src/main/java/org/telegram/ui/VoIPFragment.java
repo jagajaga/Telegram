@@ -89,6 +89,7 @@ import org.telegram.utils.pip.PipEnvironment;
 import org.telegram.ui.Components.voip.VoIPPipContent;
 import org.telegram.messenger.voip.EncryptionKeyEmojifier;
 import org.telegram.messenger.voip.Instance;
+import org.telegram.messenger.voip.CallRecorder;
 import org.telegram.messenger.voip.VideoCapturerDevice;
 import org.telegram.messenger.voip.VoIPService;
 import org.telegram.messenger.voip.VoIPServiceState;
@@ -102,6 +103,7 @@ import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.DarkAlertDialog;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AlertsCreator;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.AnimatedEmojiDrawable;
 import org.telegram.ui.Components.AnimatedEmojiSpan;
 import org.telegram.ui.Components.AvatarDrawable;
@@ -182,6 +184,8 @@ public class VoIPFragment implements
     private ConferenceParticipantsView participantsView;
     private ImageView backIcon;
     private ImageView addIcon;
+    private ImageView recordIcon;
+    private GroupCallActivity.RecordCallDrawable recordDrawable;
     private int speakerPhoneIconResId;
     private ImageView speakerPhoneIcon;
     private int selectedRating;
@@ -588,6 +592,7 @@ public class VoIPFragment implements
         ((FrameLayout.LayoutParams) acceptDeclineView.getLayoutParams()).bottomMargin = lastInsets.getSystemWindowInsetBottom();
         ((FrameLayout.LayoutParams) backIcon.getLayoutParams()).topMargin = lastInsets.getSystemWindowInsetTop();
         ((FrameLayout.LayoutParams) addIcon.getLayoutParams()).topMargin = lastInsets.getSystemWindowInsetTop();
+        ((FrameLayout.LayoutParams) recordIcon.getLayoutParams()).topMargin = dp(56) + lastInsets.getSystemWindowInsetTop();
         ((FrameLayout.LayoutParams) speakerPhoneIcon.getLayoutParams()).topMargin = dp(56) + lastInsets.getSystemWindowInsetTop();
         ((FrameLayout.LayoutParams) statusLayout.getLayoutParams()).topMargin = dp(135) + lastInsets.getSystemWindowInsetTop();
         ((FrameLayout.LayoutParams) emojiLayout.getLayoutParams()).topMargin = dp(17) + lastInsets.getSystemWindowInsetTop();
@@ -1236,6 +1241,43 @@ public class VoIPFragment implements
         frameLayout.addView(addIcon, LayoutHelper.createFrame(56, 56, Gravity.TOP | Gravity.RIGHT));
         ScaleStateListAnimator.apply(addIcon);
 
+        // call recording: same look as the other top-bar icons, Telegram's own record indicator
+        recordDrawable = new GroupCallActivity.RecordCallDrawable();
+        recordDrawable.pulse = false;
+        recordIcon = new ImageView(context);
+        recordIcon.setBackground(Theme.createSelectorDrawable(ColorUtils.setAlphaComponent(Color.WHITE, (int) (255 * 0.3f))));
+        recordIcon.setImageDrawable(recordDrawable);
+        recordDrawable.setParentView(recordIcon);
+        recordIcon.setPadding(dp(16), dp(16), dp(16), dp(16));
+        recordIcon.setContentDescription(LocaleController.getString(R.string.CallRecord));
+        recordIcon.setVisibility(View.GONE);
+        frameLayout.addView(recordIcon, LayoutHelper.createFrame(56, 56, Gravity.TOP | Gravity.LEFT, 0, 56, 0, 0));
+        ScaleStateListAnimator.apply(recordIcon);
+        recordIcon.setOnClickListener(v -> {
+            VoIPService service = VoIPService.getSharedInstance();
+            if (lockOnScreen || service == null || currentState != VoIPService.STATE_ESTABLISHED) {
+                return;
+            }
+            boolean wasRecording = CallRecorder.isRecording();
+            CallRecorder.toggle(service);
+            updateRecordIcon();
+            if (windowView != null) {
+                BulletinFactory.of(windowView, new DarkBlueThemeResourcesProvider()).createSimpleBulletin(wasRecording ? R.raw.voip_record_saved : R.raw.voip_record_start, LocaleController.getString(wasRecording ? R.string.CallRecordSaved : R.string.CallRecordStarted)).show();
+            }
+        });
+        recordIcon.setOnLongClickListener(v -> {
+            if (callingUser == null) {
+                return false;
+            }
+            boolean auto = !CallRecorder.isAuto(callingUser.id);
+            CallRecorder.setAuto(callingUser.id, auto);
+            if (windowView != null) {
+                String who = ContactsController.formatName(callingUser.first_name, callingUser.last_name);
+                BulletinFactory.of(windowView, new DarkBlueThemeResourcesProvider()).createSimpleBulletin(R.raw.voip_record_start, LocaleController.formatString(auto ? R.string.CallRecordAutoOn : R.string.CallRecordAutoOff, who)).show();
+            }
+            return true;
+        });
+
         backIcon = new ImageView(context);
         backIcon.setBackground(Theme.createSelectorDrawable(ColorUtils.setAlphaComponent(Color.WHITE, (int) (255 * 0.3f))));
         backIcon.setImageResource(R.drawable.msg_call_minimize_shadow);
@@ -1554,6 +1596,7 @@ public class VoIPFragment implements
         speakerPhoneIcon.animate().alpha(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
         backIcon.animate().alpha(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
         addIcon.animate().alpha(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
+        recordIcon.animate().alpha(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
         emojiLayout.animate().alpha(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
         statusLayout.animate().alpha(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
         buttonsLayout.animate().alpha(0).setDuration(350).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
@@ -1611,6 +1654,7 @@ public class VoIPFragment implements
             Animator animator = createPiPTransition(true);
             backIcon.setAlpha(0f);
             addIcon.setAlpha(0f);
+            recordIcon.setAlpha(0f);
             emojiLayout.setAlpha(0f);
             statusLayout.setAlpha(0f);
             buttonsLayout.setAlpha(0f);
@@ -1627,6 +1671,7 @@ public class VoIPFragment implements
                 speakerPhoneIcon.animate().setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
                 backIcon.animate().alpha(1f).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
                 addIcon.animate().alpha(1f).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
+                recordIcon.animate().alpha(1f).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
                 emojiLayout.animate().alpha(1f).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
                 statusLayout.animate().alpha(1f).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
                 buttonsLayout.animate().alpha(1f).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
@@ -1850,6 +1895,16 @@ public class VoIPFragment implements
     }
 
     private Boolean screenReleased;
+
+    private void updateRecordIcon() {
+        if (recordIcon == null) {
+            return;
+        }
+        VoIPService service = VoIPService.getSharedInstance();
+        boolean show = service != null && service.privateCall != null && currentState == VoIPService.STATE_ESTABLISHED && !lockOnScreen;
+        recordIcon.setVisibility(show ? View.VISIBLE : View.GONE);
+        recordDrawable.setRecording(CallRecorder.isRecording());
+    }
     private android.view.ViewTreeObserver.OnDrawListener drawCounter;
     private final Runnable drawStatsRunnable = new Runnable() {
         @Override
@@ -2185,6 +2240,7 @@ public class VoIPFragment implements
         showAcceptDeclineView(showAcceptDeclineView, animated);
         windowView.setLockOnScreen(lockOnScreen || deviceIsLocked);
         updateKeepScreenOn(currentState == VoIPService.STATE_ESTABLISHED && !currentUserIsVideo && !callingUserIsVideo);
+        updateRecordIcon();
         startDrawStats();
         canHideUI = (currentState == VoIPService.STATE_ESTABLISHED) && (currentUserIsVideo || callingUserIsVideo);
         if (!canHideUI && !uiVisible) {
@@ -2425,6 +2481,7 @@ public class VoIPFragment implements
             speakerPhoneIcon.animate().alpha(0).translationY(-AndroidUtilities.dp(10)).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
             backIcon.animate().alpha(0).translationY(-AndroidUtilities.dp(10)).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
             addIcon.animate().alpha(0).translationY(-AndroidUtilities.dp(10)).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
+            recordIcon.animate().alpha(0).translationY(-AndroidUtilities.dp(10)).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
             emojiLayout.animate().alpha(0).translationY(-AndroidUtilities.dp(10)).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
             callingUserTitle.animate().alpha(0).setDuration(150).translationY(-AndroidUtilities.dp(10)).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
             statusTextView.animate().alpha(0).setDuration(150).translationY(-AndroidUtilities.dp(10)).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
@@ -2447,6 +2504,7 @@ public class VoIPFragment implements
             speakerPhoneIcon.animate().alpha(1f).translationY(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
             backIcon.animate().alpha(1f).translationY(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
             addIcon.animate().alpha(1f).translationY(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
+            recordIcon.animate().alpha(1f).translationY(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
             emojiLayout.animate().alpha(1f).translationY(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
             buttonsLayout.animate().alpha(1f).translationY(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
             bottomShadow.animate().alpha(1f).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();

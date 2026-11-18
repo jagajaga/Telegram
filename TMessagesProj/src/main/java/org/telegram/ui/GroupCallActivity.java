@@ -681,7 +681,10 @@ public class GroupCallActivity extends BottomSheet implements NotificationCenter
         }
     }
 
-    private static class RecordCallDrawable extends Drawable {
+    public static class RecordCallDrawable extends Drawable {
+
+        /** Pulse the dot while recording (redraws every frame); off for the 1:1 call screen. */
+        public boolean pulse = true;
 
         private Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Paint paint2 = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -733,7 +736,7 @@ public class GroupCallActivity extends BottomSheet implements NotificationCenter
             paint2.setColor(recording ? 0xffEE7D79 : 0xffffffff);
             paint2.setAlpha((int) (255 * alpha));
             canvas.drawCircle(cx, cy, dp(5), paint2);
-            if (recording) {
+            if (recording && pulse) {
                 long newTime = SystemClock.elapsedRealtime();
                 long dt = newTime - lastUpdateTime;
                 if (dt > 17) {

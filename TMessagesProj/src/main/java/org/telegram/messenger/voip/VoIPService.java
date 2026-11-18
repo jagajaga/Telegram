@@ -4311,6 +4311,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 
 	@Override
 	public void onDestroy() {
+		CallRecorder.stop();
 		if (BuildVars.LOGS_ENABLED) {
 			FileLog.d("=============== VoIPService STOPPING ===============");
 		}
@@ -4994,6 +4995,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 		if (currentState == STATE_ESTABLISHED) {
 			destroyConverting();
 		}
+		CallRecorder.onCallState(this, state);
 		if (USE_CONNECTION_SERVICE && state == STATE_ESTABLISHED /*&& !wasEstablished*/ && systemCallConnection != null) {
 			systemCallConnection.setActive();
 		}

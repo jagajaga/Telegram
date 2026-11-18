@@ -11697,6 +11697,14 @@
     <string name="BatteryCallTimeout">Screen turns off during voice calls</string>
     <string name="BatteryStoriesMobile">Preload stories on mobile data</string>
     <string name="BatteryDiary">Battery diary</string>
+    <string name="CallRecord">Record call</string>
+    <string name="CallRecordStarted">Recording. Tap again to stop; long-press to always record this contact.</string>
+    <string name="CallRecordSaved">Recording saved to Saved Messages and Recordings/Telegram.</string>
+    <string name="CallRecordAutoOn">Calls with %1$s will be recorded automatically.</string>
+    <string name="CallRecordAutoOff">Calls with %1$s will no longer be recorded automatically.</string>
+    <string name="CallRecordAutoSettings">Automatic call recording</string>
+    <string name="CallRecordAutoNone">No contacts</string>
+    <string name="CallRecordAutoHowTo">During a call, long-press the record button to record every call with that contact automatically. Tap a contact here to stop.</string>
     <string name="BatteryDiaryAutoSend">Send the diary to Saved Messages daily</string>
     <string name="CallsSystemIntegration">System call integration</string>
     <string name="CallsSystemIntegrationInfo">Route calls through Android\'s phone framework: Bluetooth and car controls, the call log, no clash with cellular calls. Restart Telegram to apply.</string>

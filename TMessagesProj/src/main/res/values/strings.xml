@@ -11699,7 +11699,7 @@
     <string name="BatteryDiary">Battery diary</string>
     <string name="CallRecord">Record call</string>
     <string name="CallRecordStarted">Recording. Tap again to stop; long-press to always record this contact.</string>
-    <string name="CallRecordSaved">Recording saved to Saved Messages and Recordings/Telegram.</string>
+    <string name="CallRecordSaved">Recording saved to Saved Messages and Recordings.</string>
     <string name="CallRecordAutoOn">Calls with %1$s will be recorded automatically.</string>
     <string name="CallRecordAutoOff">Calls with %1$s will no longer be recorded automatically.</string>
     <string name="CallRecordAutoSettings">Automatic call recording</string>

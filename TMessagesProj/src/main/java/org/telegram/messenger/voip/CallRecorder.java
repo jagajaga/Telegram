@@ -44,7 +44,7 @@ import java.util.Set;
  * the call's audio path only pays for a buffer copy. Playout is the clock: every block of the
  * other side's audio is mixed with as much of your microphone as has arrived.
  * <p>
- * Finished recordings go to Recordings/Telegram on the phone and to Saved Messages.
+ * Finished recordings go to the phone's Recordings folder and to Saved Messages.
  */
 public class CallRecorder {
 
@@ -368,7 +368,7 @@ public class CallRecorder {
         });
     }
 
-    /** A copy in the phone's Recordings/Telegram folder, visible to file managers and music apps. */
+    /** A copy in the phone's Recordings folder, visible to file managers and music apps. */
     private void saveToRecordings() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -376,7 +376,7 @@ public class CallRecorder {
                 values.put(MediaStore.MediaColumns.DISPLAY_NAME, file.getName());
                 values.put(MediaStore.MediaColumns.MIME_TYPE, "audio/mp4");
                 String dir = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? Environment.DIRECTORY_RECORDINGS : Environment.DIRECTORY_MUSIC;
-                values.put(MediaStore.MediaColumns.RELATIVE_PATH, dir + "/Telegram");
+                values.put(MediaStore.MediaColumns.RELATIVE_PATH, dir);
                 values.put(MediaStore.Audio.Media.IS_PENDING, 1);
                 Uri collection = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
                 Uri uri = ApplicationLoader.applicationContext.getContentResolver().insert(collection, values);

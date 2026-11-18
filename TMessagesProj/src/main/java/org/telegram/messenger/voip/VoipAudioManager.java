@@ -74,16 +74,53 @@ public class VoipAudioManager {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && (type == AudioDeviceInfo.TYPE_BLE_HEADSET || type == AudioDeviceInfo.TYPE_BLE_SPEAKER);
     }
 
+    private String preferredBluetoothName;
+
+    /** The headset to route calls to when several are connected; null means the first one. */
+    public void setPreferredBluetoothDevice(AudioDeviceInfo device) {
+        preferredBluetoothName = device == null ? null : String.valueOf(device.getProductName());
+    }
+
+    /** Connected Bluetooth call devices, one per headset (a headset may expose both a classic and an LE Audio route). */
+    public java.util.List<AudioDeviceInfo> listBluetoothDevices() {
+        java.util.ArrayList<AudioDeviceInfo> list = new java.util.ArrayList<>();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            return list;
+        }
+        java.util.HashSet<String> names = new java.util.HashSet<>();
+        for (AudioDeviceInfo device : getAudioManager().getAvailableCommunicationDevices()) {
+            if (isBluetoothDevice(device) && names.add(String.valueOf(device.getProductName()))) {
+                list.add(device);
+            }
+        }
+        return list;
+    }
+
     public AudioDeviceInfo findBluetoothDevice() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             return null;
         }
+        AudioDeviceInfo first = null;
         for (AudioDeviceInfo device : getAudioManager().getAvailableCommunicationDevices()) {
             if (isBluetoothDevice(device)) {
-                return device;
+                if (preferredBluetoothName != null && preferredBluetoothName.equals(String.valueOf(device.getProductName()))) {
+                    return device;
+                }
+                if (first == null) {
+                    first = device;
+                }
             }
         }
-        return null;
+        return first;
+    }
+
+    /** Name of the Bluetooth device calls are currently routed to, or null. */
+    public String currentBluetoothName() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            return null;
+        }
+        AudioDeviceInfo current = getAudioManager().getCommunicationDevice();
+        return isBluetoothDevice(current) ? String.valueOf(current.getProductName()) : null;
     }
 
     public boolean isBluetoothOn() {

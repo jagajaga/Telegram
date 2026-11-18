@@ -3937,6 +3937,67 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 		toggleSpeakerphoneOrShowRouteSheet(context, fromOverlayWindow, null);
 	}
 
+	/**
+	 * The output sheet with every connected Bluetooth headset listed by name, so a call can be moved
+	 * from one headset to another. Upstream offered a single "Bluetooth" entry, i.e. whichever
+	 * headset Android listed first.
+	 */
+	@android.annotation.TargetApi(Build.VERSION_CODES.S)
+	private void showRouteSheetWithHeadsets(Context context, boolean fromOverlayWindow, Integer selectedPos) {
+		final VoipAudioManager vam = VoipAudioManager.get();
+		final java.util.List<android.media.AudioDeviceInfo> headsets = vam.listBluetoothDevices();
+		final int n = 2 + headsets.size();
+		CharSequence[] items = new CharSequence[n];
+		int[] icons = new int[n];
+		items[0] = LocaleController.getString(R.string.VoipAudioRoutingSpeaker);
+		icons[0] = R.drawable.msg_call_speaker;
+		items[1] = isHeadsetPlugged ? LocaleController.getString(R.string.VoipAudioRoutingHeadset) : LocaleController.getString(R.string.VoipAudioRoutingEarpiece);
+		icons[1] = isHeadsetPlugged ? R.drawable.calls_menu_headset : R.drawable.msg_call_earpiece;
+		String current = vam.currentBluetoothName();
+		Integer selected = selectedPos != null && selectedPos < 2 ? selectedPos : null;
+		for (int i = 0; i < headsets.size(); i++) {
+			String name = String.valueOf(headsets.get(i).getProductName());
+			items[2 + i] = name;
+			icons[2 + i] = R.drawable.msg_call_bluetooth;
+			if (selectedPos != null && selectedPos == 2 && name.equals(current)) {
+				selected = 2 + i;
+			}
+		}
+		final Integer selectedFinal = selected;
+		BottomSheet.Builder builder = new BottomSheet.Builder(context)
+				.setTitle(LocaleController.getString(R.string.VoipOutputDevices), true)
+				.selectedPos(selectedFinal)
+				.setCellType(selectedFinal != null ? BottomSheet.Builder.CELL_TYPE_CALL : 0)
+				.setItems(items, icons, (dialog, which) -> {
+					if (getSharedInstance() == null) {
+						return;
+					}
+					if (which >= 2) {
+						android.media.AudioDeviceInfo device = headsets.get(which - 2);
+						vam.setPreferredBluetoothDevice(device);
+						BatteryDiary.log("bluetooth: route chosen by user: " + device.getProductName());
+						bluetoothScoActive = false;
+						setAudioOutput(2);
+					} else {
+						setAudioOutput(which);
+					}
+				});
+		BottomSheet bottomSheet = builder.create();
+		bottomSheet.setOnShowListener(dialog -> {
+			for (int i = 0; i < bottomSheet.getItemViews().size(); i++) {
+				bottomSheet.setItemColor(i, Theme.getColor(Theme.key_dialogTextBlack), Theme.getColor(Theme.key_dialogTextBlack));
+			}
+			if (selectedFinal != null) {
+				int selectedColor = Theme.getColor(Theme.key_dialogTextLink);
+				bottomSheet.setItemColor(selectedFinal, selectedColor, selectedColor);
+			}
+		});
+		if (fromOverlayWindow) {
+			bottomSheet.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
+		}
+		builder.show();
+	}
+
 	public void switchToSpeaker() {
 		AndroidUtilities.runOnUIThread(() -> {
 			VoipAudioManager vam = VoipAudioManager.get();
@@ -3954,6 +4015,11 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 	}
 
 	public void toggleSpeakerphoneOrShowRouteSheet(Context context, boolean fromOverlayWindow, Integer selectedPos) {
+		if (isBluetoothHeadsetConnected() && hasEarpiece() && !usingSystemCall() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+				&& VoipAudioManager.get().listBluetoothDevices().size() > 1) {
+			showRouteSheetWithHeadsets(context, fromOverlayWindow, selectedPos);
+			return;
+		}
 		if (isBluetoothHeadsetConnected() && hasEarpiece()) {
 			BottomSheet.Builder builder = new BottomSheet.Builder(context)
 					.setTitle(LocaleController.getString(R.string.VoipOutputDevices), true)

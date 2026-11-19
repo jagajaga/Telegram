@@ -44,7 +44,12 @@ import java.util.Set;
  * the call's audio path only pays for a buffer copy. Playout is the clock: every block of the
  * other side's audio is mixed with as much of your microphone as has arrived.
  * <p>
- * Finished recordings go to the phone's Recordings folder and to Saved Messages.
+ * Finished recordings go to Recordings/Voice Recorder on the phone and to Saved Messages.
+ * <p>
+ * Crash safety: every encoded frame is also appended to a raw AAC (ADTS) backup next to the .m4a.
+ * ADTS is self-framing, so a backup cut off at any point still plays up to the cut. A normal stop
+ * deletes it; if the process dies mid-call, the next start finds it with its sidecar and saves it
+ * as a recovered recording to the same two places.
  */
 public class CallRecorder {
 
@@ -73,6 +78,10 @@ public class CallRecorder {
     private long presentationUs;
     private boolean failed;
 
+    private java.io.FileOutputStream backup;
+    private final File backupFile;
+    private final File metaFile;
+    private static final String SUBFOLDER = "Voice Recorder";
     /* ---- public API, UI thread ---- */
 
     public static boolean isRecording() {
@@ -213,6 +222,8 @@ public class CallRecorder {
         String stamp = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(new Date(startedAt));
         String safe = name.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
         this.file = new File(dir, "Call " + (safe.isEmpty() ? String.valueOf(userId) : safe) + " " + stamp + ".m4a");
+        this.backupFile = new File(dir, file.getName().replace(".m4a", ".aac.part"));
+        this.metaFile = new File(dir, file.getName().replace(".m4a", ".meta"));
     }
 
     private void open() {
@@ -225,6 +236,10 @@ public class CallRecorder {
             encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             encoder.start();
             muxer = new MediaMuxer(file.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+            try (java.io.FileWriter w = new java.io.FileWriter(metaFile)) {
+                w.write(account + "\n" + userId + "\n" + startedAt + "\n" + name);
+            }
+            backup = new java.io.FileOutputStream(backupFile);
         } catch (Throwable e) {
             FileLog.e(e);
             failed = true;
@@ -314,6 +329,9 @@ public class CallRecorder {
             if (info.size > 0 && muxerStarted) {
                 out.position(info.offset);
                 out.limit(info.offset + info.size);
+                writeBackupFrame(out, info.size);
+                out.position(info.offset);
+                out.limit(info.offset + info.size);
                 muxer.writeSampleData(track, out, info);
             }
             encoder.releaseOutputBuffer(outIndex, false);
@@ -321,6 +339,95 @@ public class CallRecorder {
                 return;
             }
         }
+    }
+
+    /** One AAC frame with its 7-byte ADTS header (AAC LC, 48 kHz, mono). Written straight to the file, no buffering. */
+    private void writeBackupFrame(ByteBuffer frame, int size) {
+        if (backup == null) {
+            return;
+        }
+        try {
+            int len = size + 7;
+            byte[] packet = new byte[len];
+            packet[0] = (byte) 0xFF;
+            packet[1] = (byte) 0xF1;
+            packet[2] = (byte) ((1 << 6) | (3 << 2) | (1 >> 2)); // LC, 48 kHz, mono
+            packet[3] = (byte) (((1 & 3) << 6) | (len >> 11));
+            packet[4] = (byte) ((len & 0x7FF) >> 3);
+            packet[5] = (byte) (((len & 7) << 5) | 0x1F);
+            packet[6] = (byte) 0xFC;
+            frame.get(packet, 7, size);
+            backup.write(packet);
+        } catch (Throwable e) {
+            FileLog.e(e);
+            closeBackup();
+        }
+    }
+
+    private void closeBackup() {
+        try {
+            if (backup != null) {
+                backup.close();
+            }
+        } catch (Throwable ignore) {
+        }
+        backup = null;
+    }
+
+    /** Called once at app start: saves recordings that a killed process never finished. */
+    public static void recoverLeftovers() {
+        queue.postRunnable(() -> {
+            File dir = new File(ApplicationLoader.applicationContext.getCacheDir(), "call_recordings");
+            File[] parts = dir.listFiles((d, n) -> n.endsWith(".aac.part"));
+            if (parts == null) {
+                return;
+            }
+            for (File part : parts) {
+                if (active != null && part.equals(active.backupFile)) {
+                    continue;
+                }
+                File meta = new File(dir, part.getName().replace(".aac.part", ".meta"));
+                File m4a = new File(dir, part.getName().replace(".aac.part", ".m4a"));
+                m4a.delete(); // never finalized, unplayable
+                if (part.length() < 2000) {
+                    part.delete();
+                    meta.delete();
+                    continue;
+                }
+                int account = UserConfig.selectedAccount;
+                long startedAt = part.lastModified();
+                String name = "";
+                try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(meta))) {
+                    account = Integer.parseInt(r.readLine());
+                    r.readLine();
+                    startedAt = Long.parseLong(r.readLine());
+                    name = r.readLine();
+                } catch (Throwable ignore) {
+                }
+                File recovered = new File(dir, part.getName().replace(".aac.part", ".aac"));
+                part.renameTo(recovered);
+                meta.delete();
+                // ~1/48 s per frame is not stored; estimate the length from the bitrate
+                long durationMs = recovered.length() * 8000L / BITRATE;
+                BatteryDiary.log("call recording: recovered " + (durationMs / 1000) + " s after the app was closed mid-call");
+                saveToRecordings(recovered, "audio/aac");
+                sendToSavedMessages(account, recovered, "Call with " + name + ", " + new SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(new Date(startedAt)) + ", ~" + AndroidUtilities.formatShortDuration((int) (durationMs / 1000)) + " (recovered)", "audio/aac");
+            }
+        });
+    }
+
+    private static void sendToSavedMessages(int account, File f, String caption, String mime) {
+        AndroidUtilities.runOnUIThread(() -> {
+            try {
+                if (!UserConfig.getInstance(account).isClientActivated()) {
+                    return;
+                }
+                long self = UserConfig.getInstance(account).getClientUserId();
+                SendMessagesHelper.prepareSendingDocument(AccountInstance.getInstance(account), f.getAbsolutePath(), f.getAbsolutePath(), null, caption, mime, self, null, null, null, null, null, false, 0, null, null, false);
+            } catch (Throwable e) {
+                FileLog.e(e);
+            }
+        });
     }
 
     private void finish() {
@@ -350,33 +457,47 @@ public class CallRecorder {
             FileLog.e(e);
             failed = true;
         }
-        if (failed || !muxerStarted || durationMs < 1000) {
-            BatteryDiary.log("call recording: nothing saved (" + (failed ? "encoder error" : "too short") + ")");
+        closeBackup();
+        String caption = "Call with " + name + ", " + new SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(new Date(startedAt)) + ", " + AndroidUtilities.formatShortDuration((int) (durationMs / 1000));
+        if (durationMs < 1000) {
+            BatteryDiary.log("call recording: nothing saved (too short)");
             file.delete();
+            backupFile.delete();
+            metaFile.delete();
             return;
         }
-        BatteryDiary.log("call recording: saved " + (durationMs / 1000) + " s, " + AndroidUtilities.formatFileSize(file.length()));
-        saveToRecordings();
-        String caption = "Call with " + name + ", " + new SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(new Date(startedAt)) + ", " + AndroidUtilities.formatShortDuration((int) (durationMs / 1000));
-        AndroidUtilities.runOnUIThread(() -> {
-            try {
-                long self = UserConfig.getInstance(account).getClientUserId();
-                SendMessagesHelper.prepareSendingDocument(AccountInstance.getInstance(account), file.getAbsolutePath(), file.getAbsolutePath(), null, caption, "audio/mp4", self, null, null, null, null, null, false, 0, null, null, false);
-            } catch (Throwable e) {
-                FileLog.e(e);
+        if (failed || !muxerStarted) {
+            // the .m4a could not be finalized; the raw AAC backup still holds the call
+            file.delete();
+            File aac = new File(file.getParentFile(), file.getName().replace(".m4a", ".aac"));
+            if (backupFile.length() > 2000 && backupFile.renameTo(aac)) {
+                metaFile.delete();
+                BatteryDiary.log("call recording: m4a failed, saved the AAC backup instead");
+                saveToRecordings(aac, "audio/aac");
+                sendToSavedMessages(account, aac, caption, "audio/aac");
+            } else {
+                BatteryDiary.log("call recording: nothing saved (encoder error)");
+                backupFile.delete();
+                metaFile.delete();
             }
-        });
+            return;
+        }
+        backupFile.delete();
+        metaFile.delete();
+        BatteryDiary.log("call recording: saved " + (durationMs / 1000) + " s, " + AndroidUtilities.formatFileSize(file.length()));
+        saveToRecordings(file, "audio/mp4");
+        sendToSavedMessages(account, file, caption, "audio/mp4");
     }
 
-    /** A copy in the phone's Recordings folder, visible to file managers and music apps. */
-    private void saveToRecordings() {
+    /** A copy in Recordings/Voice Recorder, next to the phone's own voice recordings. */
+    private static void saveToRecordings(File file, String mime) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ContentValues values = new ContentValues();
                 values.put(MediaStore.MediaColumns.DISPLAY_NAME, file.getName());
-                values.put(MediaStore.MediaColumns.MIME_TYPE, "audio/mp4");
+                values.put(MediaStore.MediaColumns.MIME_TYPE, mime);
                 String dir = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? Environment.DIRECTORY_RECORDINGS : Environment.DIRECTORY_MUSIC;
-                values.put(MediaStore.MediaColumns.RELATIVE_PATH, dir);
+                values.put(MediaStore.MediaColumns.RELATIVE_PATH, dir + "/" + SUBFOLDER);
                 values.put(MediaStore.Audio.Media.IS_PENDING, 1);
                 Uri collection = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
                 Uri uri = ApplicationLoader.applicationContext.getContentResolver().insert(collection, values);
@@ -394,7 +515,7 @@ public class CallRecorder {
                 values.put(MediaStore.Audio.Media.IS_PENDING, 0);
                 ApplicationLoader.applicationContext.getContentResolver().update(uri, values, null, null);
             } else {
-                File dir = new File(ApplicationLoader.applicationContext.getExternalFilesDir(null), "Recordings");
+                File dir = new File(ApplicationLoader.applicationContext.getExternalFilesDir(null), "Recordings/" + SUBFOLDER);
                 dir.mkdirs();
                 AndroidUtilities.copyFile(file, new File(dir, file.getName()));
             }

@@ -309,6 +309,7 @@ public class ApplicationLoader extends Application {
             FileLog.d("app start time = " + (startTime = SystemClock.elapsedRealtime()));
             BatteryDiary.processStarted();
             BatteryPolicy.installUnlockWarmup(applicationContext);
+            org.telegram.messenger.voip.CallRecorder.recoverLeftovers();
             try {
                 final PackageInfo info = ApplicationLoader.applicationContext.getPackageManager().getPackageInfo(ApplicationLoader.applicationContext.getPackageName(), 0);
                 final String abi;

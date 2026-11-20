@@ -102,12 +102,26 @@ public class CallRecorder {
     }
 
     public static void start(VoIPService service) {
-        if (active != null || service == null || service.getUser() == null || service.privateCall == null) {
+        if (active != null || service == null) {
             return;
         }
-        TLRPC.User user = service.getUser();
-        String name = ContactsController.formatName(user.first_name, user.last_name);
-        CallRecorder recorder = new CallRecorder(service.getAccount(), user.id, name);
+        final String label;
+        final long id;
+        if (service.privateCall != null && service.getUser() != null) {
+            TLRPC.User user = service.getUser();
+            label = "Call with " + ContactsController.formatName(user.first_name, user.last_name);
+            id = user.id;
+        } else if (service.groupCall != null) {
+            String title = service.groupCall.call != null ? service.groupCall.call.title : null;
+            if ((title == null || title.isEmpty()) && service.getChat() != null) {
+                title = service.getChat().title;
+            }
+            label = title == null || title.isEmpty() ? "Group call" : "Group call " + title;
+            id = 0;
+        } else {
+            return;
+        }
+        CallRecorder recorder = new CallRecorder(service.getAccount(), id, label);
         active = recorder;
         queue.postRunnable(recorder::open);
         BatteryDiary.log("call recording: started");
@@ -221,7 +235,7 @@ public class CallRecorder {
         dir.mkdirs();
         String stamp = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(new Date(startedAt));
         String safe = name.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
-        this.file = new File(dir, "Call " + (safe.isEmpty() ? String.valueOf(userId) : safe) + " " + stamp + ".m4a");
+        this.file = new File(dir, (safe.isEmpty() ? "Call" : safe) + " " + stamp + ".m4a");
         this.backupFile = new File(dir, file.getName().replace(".m4a", ".aac.part"));
         this.metaFile = new File(dir, file.getName().replace(".m4a", ".meta"));
     }
@@ -411,7 +425,7 @@ public class CallRecorder {
                 long durationMs = recovered.length() * 8000L / BITRATE;
                 BatteryDiary.log("call recording: recovered " + (durationMs / 1000) + " s after the app was closed mid-call");
                 saveToRecordings(recovered, "audio/aac");
-                sendToSavedMessages(account, recovered, "Call with " + name + ", " + new SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(new Date(startedAt)) + ", ~" + AndroidUtilities.formatShortDuration((int) (durationMs / 1000)) + " (recovered)", "audio/aac");
+                sendToSavedMessages(account, recovered, name + ", " + new SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(new Date(startedAt)) + ", ~" + AndroidUtilities.formatShortDuration((int) (durationMs / 1000)) + " (recovered)", "audio/aac");
             }
         });
     }
@@ -458,7 +472,7 @@ public class CallRecorder {
             failed = true;
         }
         closeBackup();
-        String caption = "Call with " + name + ", " + new SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(new Date(startedAt)) + ", " + AndroidUtilities.formatShortDuration((int) (durationMs / 1000));
+        String caption = name + ", " + new SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(new Date(startedAt)) + ", " + AndroidUtilities.formatShortDuration((int) (durationMs / 1000));
         if (durationMs < 1000) {
             BatteryDiary.log("call recording: nothing saved (too short)");
             file.delete();

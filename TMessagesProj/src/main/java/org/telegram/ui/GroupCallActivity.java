@@ -241,6 +241,7 @@ public class GroupCallActivity extends BottomSheet implements NotificationCenter
     private static final int noise_item = 11;
     private static final int comments_enable_item = 12;
     private static final int comments_disable_item = 13;
+    private static final int local_record_item = 14;
     private static final int user_item_gap = 0;
 
     private static final int MUTE_BUTTON_STATE_UNMUTE = 0;
@@ -392,6 +393,8 @@ public class GroupCallActivity extends BottomSheet implements NotificationCenter
     private final ActionBarMenuSubItem noiseItem;
     private final ActionBarMenuSubItem permissionItem;
     private final ActionBarMenuSubItem recordItem;
+    private final ActionBarMenuSubItem localRecordItem;
+    private RecordCallDrawable localRecordDrawable;
     private final ActionBarMenuSubItem screenItem;
     private ActionBarMenuSubItem everyoneItem;
     private ActionBarMenuSubItem adminItem;
@@ -1653,6 +1656,17 @@ public class GroupCallActivity extends BottomSheet implements NotificationCenter
         }
     }
 
+    private void updateLocalRecordItem() {
+        if (localRecordItem == null) {
+            return;
+        }
+        boolean show = call != null && !call.isScheduled() && !isRtmpStream() && VoIPService.getSharedInstance() != null;
+        localRecordItem.setVisibility(show ? View.VISIBLE : View.GONE);
+        boolean recording = org.telegram.messenger.voip.CallRecorder.isRecording();
+        localRecordItem.setText(getString(recording ? R.string.CallRecordLocalStop : R.string.CallRecordLocal));
+        localRecordDrawable.setRecording(recording);
+    }
+
     private void updateItems() {
         if (call == null || call.isScheduled()) {
             pipItem.setVisibility(View.INVISIBLE);
@@ -1762,6 +1776,7 @@ public class GroupCallActivity extends BottomSheet implements NotificationCenter
             editTitleItem.setVisibility(View.GONE);
             recordItem.setVisibility(View.GONE);
         }
+        updateLocalRecordItem();
         if (canManageCall() && call.call.can_change_join_muted && !isConference()) {
             permissionItem.setVisibility(View.VISIBLE);
         } else {
@@ -1770,7 +1785,7 @@ public class GroupCallActivity extends BottomSheet implements NotificationCenter
         otherItem.setSubItemShown(leave_item, !isConference() || call != null && call.call != null && call.call.creator);
         soundItem.setVisibility(isRtmpStream() && !call.isScheduled() ? View.GONE : View.VISIBLE);
         if (editTitleItem.getVisibility() == View.VISIBLE || permissionItem.getVisibility() == View.VISIBLE || inviteItem.getVisibility() == View.VISIBLE ||
-                screenItem.getVisibility() == View.VISIBLE || recordItem.getVisibility() == View.VISIBLE || leaveItem.getVisibility() == View.VISIBLE) {
+                screenItem.getVisibility() == View.VISIBLE || recordItem.getVisibility() == View.VISIBLE || localRecordItem.getVisibility() == View.VISIBLE || leaveItem.getVisibility() == View.VISIBLE) {
             soundItemDivider.setVisibility(View.VISIBLE);
         } else {
             soundItemDivider.setVisibility(View.GONE);
@@ -2058,6 +2073,14 @@ public class GroupCallActivity extends BottomSheet implements NotificationCenter
                     dialog.setTextColor(Theme.getColor(Theme.key_voipgroup_actionBarItems));
                 } else if (id == screen_capture_item) {
                     screenShareItem.callOnClick();
+                } else if (id == local_record_item) {
+                    VoIPService service = VoIPService.getSharedInstance();
+                    if (service != null) {
+                        boolean was = org.telegram.messenger.voip.CallRecorder.isRecording();
+                        org.telegram.messenger.voip.CallRecorder.toggle(service);
+                        updateLocalRecordItem();
+                        getUndoView().showWithAction(0, was ? UndoView.ACTION_VOIP_RECORDING_FINISHED : UndoView.ACTION_VOIP_RECORDING_STARTED, null);
+                    }
                 } else if (id == start_record_item) {
                     if (call.recording) {
                         boolean video = call.call.record_video_active;
@@ -2167,6 +2190,7 @@ public class GroupCallActivity extends BottomSheet implements NotificationCenter
                     permissionItem.setVisibility(View.GONE);
                     editTitleItem.setVisibility(View.GONE);
                     recordItem.setVisibility(View.GONE);
+                    localRecordItem.setVisibility(View.GONE);
                     screenItem.setVisibility(View.GONE);
                     accountSelectCell.setVisibility(View.GONE);
                     soundItem.setVisibility(View.GONE);
@@ -4910,6 +4934,10 @@ public class GroupCallActivity extends BottomSheet implements NotificationCenter
         recordCallDrawable = new RecordCallDrawable();
         screenItem = otherItem.addSubItem(screen_capture_item, R.drawable.msg_screencast, getString(R.string.VoipChatStartScreenCapture));
         recordItem = otherItem.addSubItem(start_record_item, 0, recordCallDrawable, getString(R.string.VoipGroupRecordCall), true, false);
+        // fork: record on this phone, for anyone in the call (Telegram's own recording above is admin-only, server-side)
+        localRecordDrawable = new RecordCallDrawable();
+        localRecordDrawable.pulse = false;
+        localRecordItem = otherItem.addSubItem(local_record_item, 0, localRecordDrawable, getString(R.string.CallRecordLocal), true, false);
         recordCallDrawable.setParentView(recordItem.getImageView());
 
         enableComments = otherItem.addSubItem(comments_enable_item, R.drawable.menu_stream_comments_24, getString(R.string.VoipChannelEnableComments));

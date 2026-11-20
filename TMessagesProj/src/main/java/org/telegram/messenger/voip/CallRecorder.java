@@ -93,12 +93,25 @@ public class CallRecorder {
         return r == null ? 0 : r.startedRealtime;
     }
 
+    /** Identity of the call the user stopped by hand; automatic recording leaves that call alone. */
+    private static int stoppedByUserFor;
+
     public static void toggle(VoIPService service) {
         if (active != null) {
+            stoppedByUserFor = System.identityHashCode(service);
             stop();
         } else {
             start(service);
         }
+    }
+
+    /** Record every call automatically. Default on. */
+    public static boolean recordAll() {
+        return prefs().getBoolean("all", true);
+    }
+
+    public static void setRecordAll(boolean value) {
+        prefs().edit().putBoolean("all", value).apply();
     }
 
     public static void start(VoIPService service) {
@@ -165,7 +178,15 @@ public class CallRecorder {
     /** Called when a call reaches "established" and when it ends. */
     public static void onCallState(VoIPService service, int state) {
         if (state == VoIPService.STATE_ESTABLISHED) {
-            if (active == null && service.getUser() != null && isAuto(service.getUser().id)) {
+            if (active != null || stoppedByUserFor == System.identityHashCode(service)) {
+                return;
+            }
+            boolean group = service.privateCall == null && service.groupCall != null;
+            if (group && service.groupCall.call != null && service.groupCall.call.rtmp_stream) {
+                return; // channel livestreams: hours long, not a conversation
+            }
+            boolean auto = recordAll() || !group && service.getUser() != null && isAuto(service.getUser().id);
+            if (auto) {
                 start(service);
             }
         } else if (state == VoIPService.STATE_ENDED || state == VoIPService.STATE_HANGING_UP || state == VoIPService.STATE_FAILED || state == VoIPService.STATE_BUSY) {

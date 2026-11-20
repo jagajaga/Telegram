@@ -137,6 +137,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
     private int callsVibrateRow;
     private int callsRingtoneRow;
     private int callsSystemIntegrationRow;
+    private int callsRecordAllRow;
     private int callsAutoRecordRow;
     private int eventsSection2Row;
     private int eventsSectionRow;
@@ -194,6 +195,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
         callsVibrateRow = rowCount++;
         callsRingtoneRow = rowCount++;
         callsSystemIntegrationRow = rowCount++;
+        callsRecordAllRow = rowCount++;
         callsAutoRecordRow = rowCount++;
         eventsSection2Row = rowCount++;
 
@@ -588,6 +590,10 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                 } else {
                     presentFragment(new NotificationsCustomSettingsActivity(type, exceptions, autoExceptions));
                 }
+            } else if (position == callsRecordAllRow) {
+                boolean all = !org.telegram.messenger.voip.CallRecorder.recordAll();
+                org.telegram.messenger.voip.CallRecorder.setRecordAll(all);
+                enabled = !all;
             } else if (position == callsAutoRecordRow) {
                 showAutoRecordDialog(position);
             } else if (position == callsRingtoneRow) {
@@ -1076,6 +1082,8 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                         checkCell.setTextAndCheck("Android Auto", preferences.getBoolean("EnableAutoNotifications", false), true);
                     } else if (position == notificationsServiceRow) {
                         checkCell.setTextAndValueAndCheck(getString("NotificationsService", R.string.NotificationsService), getString("NotificationsServiceInfo", R.string.NotificationsServiceInfo), preferences.getBoolean("pushService", getMessagesController().keepAliveService), true, true);
+                    } else if (position == callsRecordAllRow) {
+                        checkCell.setTextAndValueAndCheck(getString(R.string.CallRecordAll), getString(R.string.CallRecordAllInfo), org.telegram.messenger.voip.CallRecorder.recordAll(), true, true);
                     } else if (position == callsSystemIntegrationRow) {
                         checkCell.setTextAndValueAndCheck(getString(R.string.CallsSystemIntegration), getString(R.string.CallsSystemIntegrationInfo), MessagesController.getGlobalMainSettings().getBoolean("system_call_integration", false), true, false);
                     } else if (position == notificationsServiceConnectionRow) {
@@ -1265,7 +1273,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                     position == inappPreviewRow || position == contactJoinedRow || position == pinnedMessageRow ||
                     position == notificationsServiceRow || position == badgeNumberMutedRow || position == badgeNumberMessagesRow ||
                     position == badgeNumberShowRow || position == inappPriorityRow || position == inchatSoundRow ||
-                    position == androidAutoAlertRow || position == accountsAllRow || position == callsSystemIntegrationRow) {
+                    position == androidAutoAlertRow || position == accountsAllRow || position == callsSystemIntegrationRow || position == callsRecordAllRow) {
                 return 1;
             } else if (position == resetNotificationsRow) {
                 return 2;

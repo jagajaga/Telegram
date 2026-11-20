@@ -11702,6 +11702,8 @@
     <string name="CallRecordSaved">Recording saved to Saved Messages and Recordings/Voice Recorder.</string>
     <string name="CallRecordAutoOn">Calls with %1$s will be recorded automatically.</string>
     <string name="CallRecordAutoOff">Calls with %1$s will no longer be recorded automatically.</string>
+    <string name="CallRecordAll">Record all calls</string>
+    <string name="CallRecordAllInfo">Every call is recorded to Saved Messages and Recordings/Voice Recorder. Tap the record button to stop for one call.</string>
     <string name="CallRecordLocal">Record on this phone</string>
     <string name="CallRecordLocalStop">Stop recording on this phone</string>
     <string name="CallRecordAutoSettings">Automatic call recording</string>

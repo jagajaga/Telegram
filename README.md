@@ -17,7 +17,7 @@ An unofficial fork of [Telegram for Android](https://github.com/DrKLO/Telegram),
 
 Together: a voice call went from roughly 40–50 % of a CPU core to about 8 %.
 
-**Bluetooth headsets in calls.** Calls are routed to the headset on the first attempt, with retries and a fallback for classic headsets. In the official app the audio could stay on the earpiece with no way to switch.
+**Bluetooth headsets in calls.** Calls are routed to the headset on the first attempt, with retries and a fallback for classic headsets. In the official app the audio could stay on the earpiece with no way to switch. With several headsets connected, the output menu lists each one by name, in private and group calls.
 
 **Calls always ring.** Builds not signed by Telegram cannot receive Google push notifications, so the fork keeps Telegram's own background connection for calls and messages. If Android's system call integration refuses a call, the app falls back to ringing on its own instead of dropping it.
 

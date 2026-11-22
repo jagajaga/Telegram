@@ -3937,15 +3937,83 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 		toggleSpeakerphoneOrShowRouteSheet(context, fromOverlayWindow, null);
 	}
 
+	/** A Bluetooth headset the call can be moved to. */
+	public static final class Headset {
+		public final String name;
+		public final boolean current;
+		private final Object device;
+
+		Headset(String name, boolean current, Object device) {
+			this.name = name;
+			this.current = current;
+			this.device = device;
+		}
+	}
+
+	private static String headsetName(android.bluetooth.BluetoothDevice device) {
+		String name = null;
+		try {
+			name = device.getName();
+		} catch (SecurityException ignore) {
+		}
+		return TextUtils.isEmpty(name) ? device.getAddress() : name;
+	}
+
 	/**
-	 * The output sheet with every connected Bluetooth headset listed by name, so a call can be moved
-	 * from one headset to another. Upstream offered a single "Bluetooth" entry, i.e. whichever
-	 * headset Android listed first.
+	 * Every connected Bluetooth headset, by name. When Android's phone system (Telecom) runs the call
+	 * it is the only one allowed to switch between classic headsets, so the list and the switch go
+	 * through it; otherwise Android hands the app only the communication devices it may pick from.
+	 * Upstream offered a single "Bluetooth" entry, i.e. whichever headset Android chose.
 	 */
-	@android.annotation.TargetApi(Build.VERSION_CODES.S)
-	private void showRouteSheetWithHeadsets(Context context, boolean fromOverlayWindow, Integer selectedPos) {
-		final VoipAudioManager vam = VoipAudioManager.get();
-		final java.util.List<android.media.AudioDeviceInfo> headsets = vam.listBluetoothDevices();
+	public java.util.List<Headset> listHeadsets() {
+		java.util.ArrayList<Headset> list = new java.util.ArrayList<>();
+		try {
+			if (usingSystemCall()) {
+				if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+					CallAudioState state = systemCallConnection.getCallAudioState();
+					if (state != null) {
+						android.bluetooth.BluetoothDevice active = state.getActiveBluetoothDevice();
+						boolean onBluetooth = state.getRoute() == CallAudioState.ROUTE_BLUETOOTH;
+						for (android.bluetooth.BluetoothDevice device : state.getSupportedBluetoothDevices()) {
+							list.add(new Headset(headsetName(device), onBluetooth && device.equals(active), device));
+						}
+					}
+				}
+			} else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+				VoipAudioManager vam = VoipAudioManager.get();
+				String current = vam.currentBluetoothName();
+				for (android.media.AudioDeviceInfo device : vam.listBluetoothDevices()) {
+					String name = String.valueOf(device.getProductName());
+					list.add(new Headset(name, name.equals(current), device));
+				}
+			}
+		} catch (Throwable e) {
+			FileLog.e(e);
+		}
+		return list;
+	}
+
+	/** Moves the call to the given headset from {@link #listHeadsets()}. */
+	public void routeToHeadset(Headset headset) {
+		BatteryDiary.log("bluetooth: route chosen by user: " + headset.name + (usingSystemCall() ? " (system call)" : ""));
+		currentBluetoothDeviceName = headset.name;
+		if (usingSystemCall()) {
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && headset.device instanceof android.bluetooth.BluetoothDevice) {
+				systemCallConnection.requestBluetoothAudio((android.bluetooth.BluetoothDevice) headset.device);
+			} else {
+				setAudioOutput(2);
+			}
+			return;
+		}
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && headset.device instanceof android.media.AudioDeviceInfo) {
+			VoipAudioManager.get().setPreferredBluetoothDevice((android.media.AudioDeviceInfo) headset.device);
+		}
+		bluetoothScoActive = false;
+		setAudioOutput(2);
+	}
+
+	/** The output sheet with every connected Bluetooth headset listed by name. */
+	private void showRouteSheetWithHeadsets(Context context, boolean fromOverlayWindow, Integer selectedPos, java.util.List<Headset> headsets) {
 		final int n = 2 + headsets.size();
 		CharSequence[] items = new CharSequence[n];
 		int[] icons = new int[n];
@@ -3953,13 +4021,11 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 		icons[0] = R.drawable.msg_call_speaker;
 		items[1] = isHeadsetPlugged ? LocaleController.getString(R.string.VoipAudioRoutingHeadset) : LocaleController.getString(R.string.VoipAudioRoutingEarpiece);
 		icons[1] = isHeadsetPlugged ? R.drawable.calls_menu_headset : R.drawable.msg_call_earpiece;
-		String current = vam.currentBluetoothName();
 		Integer selected = selectedPos != null && selectedPos < 2 ? selectedPos : null;
 		for (int i = 0; i < headsets.size(); i++) {
-			String name = String.valueOf(headsets.get(i).getProductName());
-			items[2 + i] = name;
+			items[2 + i] = headsets.get(i).name;
 			icons[2 + i] = R.drawable.msg_call_bluetooth;
-			if (selectedPos != null && selectedPos == 2 && name.equals(current)) {
+			if (selectedPos != null && selectedPos == 2 && headsets.get(i).current) {
 				selected = 2 + i;
 			}
 		}
@@ -3973,11 +4039,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 						return;
 					}
 					if (which >= 2) {
-						android.media.AudioDeviceInfo device = headsets.get(which - 2);
-						vam.setPreferredBluetoothDevice(device);
-						BatteryDiary.log("bluetooth: route chosen by user: " + device.getProductName());
-						bluetoothScoActive = false;
-						setAudioOutput(2);
+						routeToHeadset(headsets.get(which - 2));
 					} else {
 						setAudioOutput(which);
 					}
@@ -4015,10 +4077,12 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 	}
 
 	public void toggleSpeakerphoneOrShowRouteSheet(Context context, boolean fromOverlayWindow, Integer selectedPos) {
-		if (isBluetoothHeadsetConnected() && hasEarpiece() && !usingSystemCall() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-				&& VoipAudioManager.get().listBluetoothDevices().size() > 1) {
-			showRouteSheetWithHeadsets(context, fromOverlayWindow, selectedPos);
-			return;
+		if (isBluetoothHeadsetConnected() && hasEarpiece()) {
+			java.util.List<Headset> headsets = listHeadsets();
+			if (headsets.size() > 1) {
+				showRouteSheetWithHeadsets(context, fromOverlayWindow, selectedPos, headsets);
+				return;
+			}
 		}
 		if (isBluetoothHeadsetConnected() && hasEarpiece()) {
 			BottomSheet.Builder builder = new BottomSheet.Builder(context)
@@ -6094,6 +6158,9 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 			if (state != null && state.getSupportedRouteMask() != loggedRouteMask) {
 				loggedRouteMask = state.getSupportedRouteMask();
 				BatteryDiary.log("call: system audio routes " + loggedRouteMask + " (bluetooth " + ((loggedRouteMask & CallAudioState.ROUTE_BLUETOOTH) != 0 ? "offered" : "NOT offered") + "), current " + state.getRoute());
+			}
+			if (state != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && state.getActiveBluetoothDevice() != null) {
+				currentBluetoothDeviceName = headsetName(state.getActiveBluetoothDevice());
 			}
 			if (BuildVars.LOGS_ENABLED) {
 				FileLog.d("ConnectionService call audio state changed: " + state);

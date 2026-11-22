@@ -2359,11 +2359,27 @@ public class GroupCallActivity extends BottomSheet implements NotificationCenter
                         options.add(1);
                     }
 
+                    ArrayList<VoIPService.Headset> headsetOptions = new ArrayList<>();
+                    int selectedHeadset = -1;
                     if (service.isBluetoothHeadsetConnected()) {
-                        names.add(service.currentBluetoothDeviceName != null ? service.currentBluetoothDeviceName : getString(R.string.VoipAudioRoutingBluetooth));
-                        icons.add(R.drawable.msg_voice_bluetooth);
-                        options.add(2);
+                        java.util.List<VoIPService.Headset> headsets = service.listHeadsets();
+                        if (headsets.size() > 1) {
+                            for (VoIPService.Headset headset : headsets) {
+                                if (headset.current) {
+                                    selectedHeadset = names.size();
+                                }
+                                names.add(headset.name);
+                                icons.add(R.drawable.msg_voice_bluetooth);
+                                options.add(2);
+                                headsetOptions.add(headset);
+                            }
+                        } else {
+                            names.add(service.currentBluetoothDeviceName != null ? service.currentBluetoothDeviceName : getString(R.string.VoipAudioRoutingBluetooth));
+                            icons.add(R.drawable.msg_voice_bluetooth);
+                            options.add(2);
+                        }
                     }
+                    final int firstHeadsetOption = names.size() - headsetOptions.size();
 
                     int n = names.size();
                     CharSequence[] itemsArray = new CharSequence[n];
@@ -2380,11 +2396,18 @@ public class GroupCallActivity extends BottomSheet implements NotificationCenter
                                             return;
                                         }
                                         int newValue = options.get(which);
+                                        final VoIPService.Headset headset = !headsetOptions.isEmpty() && which >= firstHeadsetOption ? headsetOptions.get(which - firstHeadsetOption) : null;
                                         cacheAudioOutputValue = newValue;
                                         updateState(true, true);
                                         cacheAudioOutputValue = null;
                                         AndroidUtilities.runOnUIThread(() -> {
-                                            setAudioOutputValue(newValue);
+                                            VoIPService voip = VoIPService.getSharedInstance();
+                                            if (headset != null && voip != null) {
+                                                voip.routeToHeadset(headset);
+                                                cacheAudioOutputValue = newValue;
+                                            } else {
+                                                setAudioOutputValue(newValue);
+                                            }
 
                                             BulletinFactory.of(topBulletinContainer, new DarkBlueThemeResourcesProvider())
                                                 .createSimpleBulletin(getContext().getResources().getDrawable(getAudioOutputToastIcon(newValue)).mutate(), getAudioOutputToastText(newValue))
@@ -2400,8 +2423,10 @@ public class GroupCallActivity extends BottomSheet implements NotificationCenter
                         selectedPosition = 0;
                     } else if (service.getCurrentAudioRoute() == VoIPService.AUDIO_ROUTE_EARPIECE) {
                         selectedPosition = 1;
+                    } else if (!headsetOptions.isEmpty()) {
+                        selectedPosition = selectedHeadset;
                     } else {
-                        selectedPosition = 2;
+                        selectedPosition = options.indexOf(2);
                     }
                     builder.show();
                     bottomSheet.setTitleColor(Theme.getColor(Theme.key_voipgroup_nameText));
